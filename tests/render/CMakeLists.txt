@@ -9,3 +9,8 @@ endif()
 scvp_add_test(tst_viewtransform tst_viewtransform.cpp LIBS scvp::render)
 scvp_add_test(tst_display tst_display.cpp LIBS scvp_gltestsupport)
 scvp_add_test(tst_cudainterop tst_cudainterop.cpp LIBS scvp_gltestsupport)
+
+# Upload/convert timing on the current GL driver (not a ctest; run by hand):
+#   QT_QPA_PLATFORM=offscreen build/dev/tests/render/bench_render
+add_executable(bench_render bench_render.cpp)
+target_link_libraries(bench_render PRIVATE scvp_gltestsupport scvp::compile_options)
