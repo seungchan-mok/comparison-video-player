@@ -6,6 +6,7 @@
 
 namespace scvp::ui {
 
+class ControlBar;
 class KeyRouter;
 class Player;
 class VideoView;
@@ -28,6 +29,7 @@ private:
 
     VideoView* m_view;
     Player* m_player;
+    ControlBar* m_controls;
     KeyRouter* m_keys;
 };
 

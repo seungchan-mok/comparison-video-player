@@ -1,6 +1,7 @@
 #include "engine/FFmpegSource.h"
 #include "render/CodeReader.h"
 #include "render/ColorParams.h"
+#include "render/ViewTransform.h"
 #include "support/TestSupport.h"
 
 #include <QImage>
@@ -19,7 +20,7 @@ QImage grab(const QString& file, const QStringList& extra, QString* log)
     const QString png = dir.filePath(QStringLiteral("grab.png"));
     QProcess p;
     p.setProcessChannelMode(QProcess::MergedChannels);
-    QStringList args{QStringLiteral(SCVP_APP_PATH), file, QStringLiteral("--debug-size"), QStringLiteral("640x480"),
+    QStringList args{QStringLiteral(SCVP_APP_PATH), file, QStringLiteral("--debug-size"), QStringLiteral("700x600"),
                      QStringLiteral("--debug-grab"), png};
     args += extra;
     p.start(QStringLiteral(SCVP_XVFB_RUN), args);
@@ -65,9 +66,14 @@ private slots:
             QSKIP("Xvfb not available");
         QVERIFY2(!img.isNull(), qPrintable(log));
         QVERIFY2(log.contains(QLatin1String("(frame 100)")), qPrintable(log));
-        QCOMPARE(img.size(), QSize(640, 480));
 
-        // The window fits 320x240 at exactly 2x: every source pixel is a 2x2 block.
+        // Same fit the view computes for its size; every source pixel is an s x s block.
+        render::ViewTransform vt;
+        vt.setViewportSize(QSizeF(img.size()));
+        vt.setImageSize(QSizeF(320, 240));
+        const int s = int(vt.scale());
+        QVERIFY2(s >= 1 && double(s) == vt.scale(), qPrintable(QString::number(vt.scale())));
+        const QPoint t = vt.renderTranslation().toPoint();
         FramePtr f = decodeFrame(fx->path, 100);
         QVERIFY(f);
         const auto layout = *render::PixelLayout::of(f->format());
@@ -78,16 +84,16 @@ private slots:
             for (int x = 0; x < 320; ++x) {
                 const auto k = render::readCodes(f->av, layout, x, y);
                 const auto ref = color.toRgb(k[0], k[1], k[2]);
-                for (int dy = 0; dy < 2; ++dy)
-                    for (int dx = 0; dx < 2; ++dx) {
-                        const QColor c = img.pixelColor(2 * x + dx, 2 * y + dy);
+                for (int dy = 0; dy < s; ++dy)
+                    for (int dx = 0; dx < s; ++dx) {
+                        const QColor c = img.pixelColor(t.x() + s * x + dx, t.y() + s * y + dy);
                         const int d = std::max({std::abs(c.red() - ref[0]), std::abs(c.green() - ref[1]), std::abs(c.blue() - ref[2])});
                         worst = std::max(worst, d);
                         off += d ? 1 : 0;
                     }
             }
         QVERIFY2(worst <= 1, qPrintable(QString::number(worst)));
-        QVERIFY(off <= 640 * 480 / 1000);
+        QVERIFY(off <= 320 * 240 * s * s / 1000);
     }
 
     void playbackAdvances()

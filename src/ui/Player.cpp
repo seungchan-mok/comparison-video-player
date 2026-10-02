@@ -79,6 +79,77 @@ void Player::seek(int64_t position)
     refresh();
 }
 
+void Player::setSpeed(double speed)
+{
+    m_controller.setSpeed(speed);
+    refresh();
+    emit transportChanged();
+}
+
+void Player::setJumpSettings(const JumpSettings& j)
+{
+    m_controller.setJumpSettings(j);
+    emit transportChanged();
+}
+
+void Player::setLoopStart()
+{
+    m_controller.setLoopStart();
+    refresh();
+    emit transportChanged();
+}
+
+void Player::setLoopEnd()
+{
+    m_controller.setLoopEnd();
+    refresh();
+    emit transportChanged();
+}
+
+void Player::toggleLoop()
+{
+    m_controller.toggleLoop();
+    refresh();
+    emit transportChanged();
+}
+
+void Player::clearLoop()
+{
+    m_controller.clearLoop();
+    refresh();
+    emit transportChanged();
+}
+
+void Player::setLoop(int64_t first, int64_t last)
+{
+    m_controller.setLoop(first, last);
+    refresh();
+    emit transportChanged();
+}
+
+int64_t Player::indexedFrames() const
+{
+    FrameIndexPtr idx = m_engine.index(m_controller.masterSlot());
+    return idx ? idx->frameCount() : 0;
+}
+
+void Player::scrubBegin()
+{
+    m_resumeAfterScrub = m_controller.playing();
+    if (m_resumeAfterScrub)
+        m_controller.pause();
+}
+
+void Player::scrubTo(int64_t frame) { seek(frame); }
+
+void Player::scrubEnd(int64_t frame)
+{
+    seek(frame);
+    if (m_resumeAfterScrub)
+        togglePlay();
+    m_resumeAfterScrub = false;
+}
+
 void Player::onTick(double now) { present(m_controller.tick(now)); }
 
 void Player::refresh() { present(m_controller.tick(m_pacer->now())); }
@@ -95,6 +166,7 @@ void Player::present(const TickResult& r)
     if (m_controller.playing() != m_lastPlaying) {
         m_lastPlaying = m_controller.playing();
         emit playingChanged(m_lastPlaying);
+        emit transportChanged();
     }
     if (r.stalled != m_lastStalled) {
         m_lastStalled = r.stalled;

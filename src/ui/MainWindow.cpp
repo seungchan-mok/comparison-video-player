@@ -1,11 +1,13 @@
 #include "ui/MainWindow.h"
 
+#include "ui/ControlBar.h"
 #include "ui/KeyRouter.h"
 #include "ui/Player.h"
 #include "ui/VideoView.h"
 
 #include <QFileInfo>
 #include <QMessageBox>
+#include <QVBoxLayout>
 
 namespace scvp::ui {
 
@@ -13,9 +15,16 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
     , m_view(new VideoView(this))
     , m_player(new Player(m_view, this))
+    , m_controls(new ControlBar(m_player, this))
     , m_keys(new KeyRouter(this, m_view, KeyMap::defaults(), [this] { return m_player->controller().positionShown(); }, this))
 {
-    setCentralWidget(m_view);
+    auto* central = new QWidget(this);
+    auto* layout = new QVBoxLayout(central);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    layout->addWidget(m_view, 1);
+    layout->addWidget(m_controls);
+    setCentralWidget(central);
     connect(m_keys, &KeyRouter::triggered, this, &MainWindow::handleAction);
     resize(1280, 760);
     connect(m_player, &Player::positionChanged, this, [this] { updateTitle(); });
@@ -64,10 +73,10 @@ void MainWindow::handleAction(Action a, bool)
     case Action::JumpForwardLarge: m_player->jump(1, true); break;
     case Action::GoToStart: m_player->seek(0); break;
     case Action::GoToEnd: m_player->seek(m_player->controller().length() - 1); break;
-    case Action::LoopIn: m_player->controller().setLoopStart(); m_player->refresh(); break;
-    case Action::LoopOut: m_player->controller().setLoopEnd(); m_player->refresh(); break;
-    case Action::LoopToggle: m_player->controller().toggleLoop(); m_player->refresh(); break;
-    case Action::LoopClear: m_player->controller().clearLoop(); m_player->refresh(); break;
+    case Action::LoopIn: m_player->setLoopStart(); break;
+    case Action::LoopOut: m_player->setLoopEnd(); break;
+    case Action::LoopToggle: m_player->toggleLoop(); break;
+    case Action::LoopClear: m_player->clearLoop(); break;
     case Action::ZoomFit: m_view->fitToWindow(); break;
     case Action::ZoomOneToOne: m_view->oneToOne(); break;
     case Action::ZoomIn: m_view->zoomSteps(1); break;

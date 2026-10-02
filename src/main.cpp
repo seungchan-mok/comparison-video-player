@@ -62,7 +62,8 @@ int main(int argc, char* argv[])
     QCommandLineOption debugSeek(QStringLiteral("debug-seek"), QStringLiteral("Seek to this frame after opening."), QStringLiteral("frame"));
     QCommandLineOption debugPlay(QStringLiteral("debug-play"), QStringLiteral("Start playback after opening."));
     QCommandLineOption debugSize(QStringLiteral("debug-size"), QStringLiteral("Window size WxH."), QStringLiteral("WxH"));
-    for (const auto& o : {debugGrab, debugAfter, debugSeek, debugPlay, debugSize}) {
+    QCommandLineOption debugGrabWindow(QStringLiteral("debug-grab-window"), QStringLiteral("Grab the whole window, not just the video."));
+    for (const auto& o : {debugGrab, debugAfter, debugSeek, debugPlay, debugSize, debugGrabWindow}) {
         QCommandLineOption hidden = o;
         hidden.setFlags(QCommandLineOption::HiddenFromHelp);
         parser.addOption(hidden);
@@ -87,8 +88,9 @@ int main(int argc, char* argv[])
     }
     if (parser.isSet(debugGrab)) {
         const QString out = parser.value(debugGrab);
-        QTimer::singleShot(parser.value(debugAfter).toInt(), &window, [&window, out] {
-            const QImage img = window.view()->grabFramebuffer();
+        const bool wholeWindow = parser.isSet(debugGrabWindow);
+        QTimer::singleShot(parser.value(debugAfter).toInt(), &window, [&window, out, wholeWindow] {
+            const QImage img = wholeWindow ? window.grab().toImage() : window.view()->grabFramebuffer();
             const bool ok = img.save(out);
             std::fprintf(stderr, "debug-grab: %s %dx%d -> %s (frame %lld)\n", ok ? "saved" : "FAILED", img.width(), img.height(),
                          qPrintable(out), (long long)window.player()->controller().position());
