@@ -26,6 +26,7 @@ protected:
 
 private:
     QStringList lines() const;
+    QString pathText(int slot) const;
 
     Player* m_player;
     QTimer m_refresh;

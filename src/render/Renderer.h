@@ -25,6 +25,9 @@ struct RenderState {
     std::array<ColorOverrides, 2> color;
 };
 
+// How the frame on screen reached its textures.
+enum class UploadPath { None, Upload, ZeroCopy, Download };
+
 struct RenderTimings {
     double uploadMs = 0;
     double convertMs = 0;
@@ -48,13 +51,14 @@ public:
     QString error() const { return m_error; }
     const RgbConverter& converter(int slot) const { return m_slots[size_t(slot)].conv; }
     ColorParams colorParams(int slot) const { return m_slots[size_t(slot)].color; }
+    UploadPath uploadPath(int slot) const { return m_slots[size_t(slot)].path; }
 
 private:
     struct Slot {
         CpuUploadSource upload;
         CudaInteropSource interop;
         RgbConverter conv;
-        bool lastWasGpu = false;
+        UploadPath path = UploadPath::None;
         const Frame* shown = nullptr;   // identity of the converted frame
         FramePtr hold;                  // keeps it alive while its pixels are on the GPU
         ColorParams color;

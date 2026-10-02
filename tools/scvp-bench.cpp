@@ -101,6 +101,7 @@ struct Options {
     double seconds = 10;
     int requestEvery = 1;
     std::string hw = "gpu";
+    long long vramMb = -1;  // -1 = automatic
     bool json = false;
 };
 
@@ -135,7 +136,7 @@ int usage()
     std::fprintf(stderr,
                  "usage: scvp-bench FILE [--scenario all|open|seq|realtime|random|backstep|cached]\n"
                  "                  [--budget-mb N] [--jumps N] [--steps N] [--think-ms N] [--seconds N]\n"
-                 "                  [--request-every N] [--hw gpu|cpu|cuda|vaapi|...] [--json]\n");
+                 "                  [--request-every N] [--hw gpu|cpu|cuda|vaapi|...] [--vram-mb N] [--json]\n");
     return 2;
 }
 
@@ -168,6 +169,9 @@ int main(int argc, char** argv)
         } else if (a == "--request-every") {
             if (const char* v = next())
                 o.requestEvery = std::max(1, std::atoi(v));
+        } else if (a == "--vram-mb") {
+            if (const char* v = next())
+                o.vramMb = std::atoll(v);
         } else if (a == "--hw") {
             if (const char* v = next())
                 o.hw = v;
@@ -192,6 +196,8 @@ int main(int argc, char** argv)
         hw.device = av_hwdevice_find_type_by_name(o.hw.c_str());
     }
     engine.setHardware(hw);
+    if (o.vramMb >= 0)
+        engine.setGpuMemoryBudget(size_t(o.vramMb) << 20);
     if (o.budgetMb)
         engine.setMemoryBudget(o.budgetMb << 20);
     Waiter waiter(engine);

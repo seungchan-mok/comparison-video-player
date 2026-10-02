@@ -52,6 +52,25 @@ SettingsDialog::SettingsDialog(const AppSettings& current, std::function<std::pa
     memForm->addRow(tr("Decoded frame cache"), m_autoCache);
     memForm->addRow(QString(), m_cacheMb);
     memForm->addRow(QString(), m_cacheInfo);
+    m_autoVram = new QCheckBox(tr("Automatic (40 % of GPU memory: %1 MB)").arg(Engine::defaultGpuMemoryBudget() >> 20));
+    m_vramMb = new QSpinBox;
+    m_vramMb->setRange(0, 1 << 20);
+    m_vramMb->setSingleStep(256);
+    m_vramMb->setSuffix(QStringLiteral(" MB"));
+    m_vramMb->setValue(int(current.vramBytes() >> 20));
+    m_autoVram->setChecked(current.vramMb == 0);
+    m_vramMb->setEnabled(current.vramMb != 0);
+    connect(m_autoVram, &QCheckBox::toggled, this, [this](bool on) {
+        m_vramMb->setEnabled(!on);
+        if (on)
+            m_vramMb->setValue(int(Engine::defaultGpuMemoryBudget() >> 20));
+    });
+    auto* vramNote = new QLabel(tr("Frames decoded on an NVIDIA GPU near the playhead stay in video memory and go to the screen "
+                                   "without passing through the CPU; frames further away move to system memory."));
+    vramNote->setWordWrap(true);
+    memForm->addRow(tr("GPU frame cache"), m_autoVram);
+    memForm->addRow(QString(), m_vramMb);
+    memForm->addRow(QString(), vramNote);
     connect(m_autoCache, &QCheckBox::toggled, this, [this](bool on) {
         m_cacheMb->setEnabled(!on);
         if (on)
@@ -145,6 +164,7 @@ AppSettings SettingsDialog::result() const
     AppSettings s = m_settings;
     s.cacheMb = m_autoCache->isChecked() ? 0 : size_t(m_cacheMb->value());
     s.hwdec = m_hwdec->currentData().toString();
+    s.vramMb = m_autoVram->isChecked() ? 0 : size_t(std::max(1, m_vramMb->value()));
     s.jumps.small = m_jumpSmall->value();
     s.jumps.large = m_jumpLarge->value();
     s.jumps.inFrames = m_jumpUnit->currentIndex() == 1;

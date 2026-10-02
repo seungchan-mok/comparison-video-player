@@ -31,6 +31,7 @@ public:
     void applySettings(const AppSettings& s);
     void overrideCacheBudget(size_t bytes);  // command line: this run only
     void overrideHardware(const HwConfig& hw);
+    void overrideGpuBudget(size_t bytes);
     void reopenAll();  // after a decoding change: same files, same frame
 
 protected:

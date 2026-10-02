@@ -1,5 +1,7 @@
 #include "engine/DecodeLane.h"
 
+#include "engine/GpuFrame.h"
+
 #include "engine/Log.h"
 #include "engine/Platform.h"
 
@@ -126,6 +128,33 @@ std::optional<DecodeLane::Task> DecodeLane::pick(const WantList& w, const FrameI
     return std::nullopt;
 }
 
+// A VRAM frame pushed out by frames needed sooner: keep it in system memory if that tier wants it.
+void DecodeLane::spillToRam(const FramePtr& v)
+{
+    if (!v->gpu || !v->gpu->pool || !m_cfg.pool)
+        return;
+    if (m_cache.worstCost() >= 0 && m_cache.bytes() + v->bytes > m_cache.budget() &&
+        m_cache.policy().cost(v->pres) >= m_cache.worstCost())
+        return;  // the system-memory tier would reject it anyway: skip the copy
+    AVFrame* cpu = v->gpu->pool->download(*v->gpu, *m_cfg.pool);
+    if (!cpu)
+        return;
+    av_frame_copy_props(cpu, v->av);
+    auto f = std::make_shared<Frame>();
+    f->av = cpu;
+    f->pres = v->pres;
+    f->dec = v->dec;
+    f->pts = v->pts;
+    f->key = v->key;
+    f->pictType = v->pictType;
+    f->provisional = v->provisional;
+    f->hardware = true;
+    f->bytes = ff::frameBufferBytes(cpu);
+    m_frameBytes.store(f->bytes, std::memory_order_relaxed);
+    m_stats.spills.fetch_add(1, std::memory_order_relaxed);
+    m_cache.offer(std::move(f));
+}
+
 void DecodeLane::markUnreachable(int32_t first, int32_t last)
 {
     for (int32_t i = first; i <= last; ++i)
@@ -158,8 +187,14 @@ void DecodeLane::exec(const Task& t, const FrameIndex& idx, uint64_t generation)
     const std::function<bool(int32_t)> needed = [this, &t](int32_t frame) {
         return frame >= t.keepFrom && !m_cache.contains(frame);
     };
+    // Hardware frames stay in VRAM while the VRAM tier wants them (zero-copy display).
+    const std::function<bool(int32_t)> keepOnGpu = [this](int32_t frame) {
+        const size_t est = m_gpuFrameBytes.load(std::memory_order_relaxed);
+        return m_cache.wantsGpu(frame, est ? est : m_frameBytes.load(std::memory_order_relaxed));
+    };
     DecodeHints hints;
     hints.frameNeeded = &needed;
+    hints.keepOnGpu = &keepOnGpu;
     hints.cancel = &m_mailbox.generationRef();
     hints.generation = generation;
     bool gotFirst = m_cache.contains(t.first);
@@ -183,7 +218,12 @@ void DecodeLane::exec(const Task& t, const FrameIndex& idx, uint64_t generation)
             return;
         }
         m_stats.framesDecoded.fetch_add(1, std::memory_order_relaxed);
-        m_frameBytes.store(f->bytes, std::memory_order_relaxed);
+        if (f->location == FrameLocation::Cuda) {
+            m_gpuFrameBytes.store(f->bytes, std::memory_order_relaxed);
+            m_stats.gpuFrames.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            m_frameBytes.store(f->bytes, std::memory_order_relaxed);
+        }
         if (m_stats.framesDecoded.load(std::memory_order_relaxed) % 64 == 1) {
             std::lock_guard<std::mutex> lock(m_describeMutex);
             m_hwDevice = m_session->hardwareDevice();
@@ -200,11 +240,14 @@ void DecodeLane::exec(const Task& t, const FrameIndex& idx, uint64_t generation)
         }
         if (pres >= t.first)
             gotFirst = true;
-        if (m_cache.offer(std::move(f))) {
+        std::vector<FramePtr> spilled;
+        if (m_cache.offer(std::move(f), &spilled)) {
             m_stats.framesCached.fetch_add(1, std::memory_order_relaxed);
             if (m_onFrames)
                 m_onFrames();
         }
+        for (const FramePtr& v : spilled)
+            spillToRam(v);
         if (pres >= t.last)
             return;
     }

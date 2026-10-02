@@ -246,6 +246,61 @@ private slots:
         }
     }
 
+    // VRAM frames: the nearest frames stay on the GPU, the ones pushed out are reported for
+    // spilling, everything else lives in system memory.
+    void twoTiers()
+    {
+        Fx fx;
+        fx.make(0);
+        FrameCache cache(fx.budget(20));
+        cache.setGpuBudget(fx.frameBytes * 4);
+        CachePolicy pol;
+        pol.playhead = 50;
+        cache.setPolicy(pol);
+        auto gpuFrame = [&](int32_t n) {
+            auto f = std::make_shared<Frame>();
+            f->av = av_frame_alloc();
+            f->pres = n;
+            f->location = FrameLocation::Cuda;
+            f->bytes = fx.frameBytes;
+            return f;
+        };
+        QVERIFY(cache.wantsGpu(50, fx.frameBytes));
+        std::vector<FramePtr> spilled;
+        for (int32_t n : {50, 51, 52, 53})
+            QVERIFY(cache.offer(gpuFrame(n), &spilled));
+        QVERIFY(spilled.empty());
+        QCOMPARE(cache.gpuFrames(), size_t(4));
+        QVERIFY(!cache.wantsGpu(60, fx.frameBytes));  // further than everything on the GPU
+        QVERIFY(cache.wantsGpu(49, fx.frameBytes));   // closer than frame 53
+        QVERIFY(cache.offer(gpuFrame(49), &spilled));
+        QCOMPARE(int(spilled.size()), 1);
+        QCOMPARE(spilled[0]->pres, 53);
+        QVERIFY(!cache.contains(53));
+        // The caller copies the spilled frame down: it replaces nothing and joins the RAM tier.
+        QVERIFY(cache.offer(fx.make(53)));
+        QCOMPARE(cache.get(53)->location, FrameLocation::Cpu);
+        QCOMPARE(cache.gpuFrames(), size_t(4));
+        QCOMPARE(cache.frames(), size_t(5));
+        QCOMPARE(cache.gpuBytes(), fx.frameBytes * 4);
+        QCOMPARE(cache.bytes(), fx.frameBytes);
+        // Range snapshots tell GPU runs apart.
+        RangeSetPtr r = cache.ranges();
+        QCOMPARE(r->gpuFrames, size_t(4));
+        QVERIFY((r->ranges[0] == FrameRange{49, 52, true}));
+        QVERIFY(r->ranges[0].gpu);
+        QVERIFY(!r->ranges[1].gpu);
+        QCOMPARE(r->ranges[1].first, 53);
+        // A system-memory copy of a frame that is still on the GPU replaces it (tier move).
+        QVERIFY(cache.offer(fx.make(50)));
+        QCOMPARE(cache.get(50)->location, FrameLocation::Cpu);
+        QCOMPARE(cache.gpuFrames(), size_t(3));
+        // Without a GPU budget nothing is kept on the GPU.
+        cache.setGpuBudget(0);
+        QCOMPARE(cache.gpuFrames(), size_t(0));
+        QVERIFY(!cache.wantsGpu(50, fx.frameBytes));
+    }
+
     void concurrentOffersAndLookups()
     {
         Fx fx;

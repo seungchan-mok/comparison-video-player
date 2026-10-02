@@ -34,6 +34,8 @@ private:
     QComboBox* m_hwdec;
     QCheckBox* m_autoCache;
     QSpinBox* m_cacheMb;
+    QCheckBox* m_autoVram;
+    QSpinBox* m_vramMb;
     QLabel* m_cacheInfo;
     QDoubleSpinBox* m_jumpSmall;
     QDoubleSpinBox* m_jumpLarge;

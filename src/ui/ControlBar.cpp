@@ -172,14 +172,19 @@ void ControlBar::syncStats()
     size_t bytes = 0;
     size_t frames = 0;
     size_t budget = 0;
+    size_t gpu = 0;
     for (int s = 0; s < Engine::kSlots; ++s)
         if (m_player->slotOpen(s)) {
             const SlotStats st = m_player->engine().stats(s);
             bytes += st.cachedBytes;
             frames += st.cachedFrames;
             budget += st.budgetBytes;
+            gpu += st.gpuBytes;
         }
-    m_cache->setText(QStringLiteral("%1/%2 MB %3 fr").arg(bytes >> 20).arg(budget >> 20).arg(frames));
+    QString t = QStringLiteral("%1/%2 MB %3 fr").arg(bytes >> 20).arg(budget >> 20).arg(frames);
+    if (gpu)
+        t += QStringLiteral(" +%1 MB GPU").arg(gpu >> 20);
+    m_cache->setText(t);
 }
 
 void ControlBar::setOverlay(bool overlay)

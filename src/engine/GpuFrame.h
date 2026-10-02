@@ -4,6 +4,7 @@
 #include "engine/FfmpegCompat.h"
 #include "engine/Frame.h"
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -40,6 +41,8 @@ class GpuFramePool : public std::enable_shared_from_this<GpuFramePool> {
 public:
     // nullptr when `cudaDevice` is not a CUDA device or the driver API is unavailable.
     static std::shared_ptr<GpuFramePool> create(AVBufferRef* cudaDevice);
+    // The process-wide pool for a device context (one per CUDA context).
+    static std::shared_ptr<GpuFramePool> forDevice(AVBufferRef* cudaDevice);
     ~GpuFramePool();
 
     CUcontext context() const { return m_ctx; }
@@ -55,6 +58,7 @@ public:
 
     size_t liveBytes() const;
     size_t cachedBytes() const;
+    uint64_t allocationFailures() const { return m_failures.load(); }
     void setCacheLimit(size_t bytes);
     void trim();
     // Free / total device memory of the context's device.
@@ -79,6 +83,7 @@ private:
     size_t m_live = 0;
     size_t m_cached = 0;
     size_t m_cacheLimit = size_t(256) << 20;
+    std::atomic<uint64_t> m_failures{0};
 };
 
 // A Frame in device memory with `src`'s metadata (format/size/colour copied, no pixels).

@@ -160,6 +160,8 @@ void MainWindow::applySettings(const AppSettings& s)
     if (s.hwConfig().policy != HwPolicy::Off)
         HwDevices::instance().warmUp();
     m_player->engine().setMemoryBudget(s.cacheBytes());
+    if (s.vramMb)
+        m_player->engine().setGpuMemoryBudget(s.vramBytes());
     m_player->setJumpSettings(s.jumps);
     m_controls->setJumpSettings(s.jumps);
     m_keys->setKeyMap(s.keys);
@@ -172,6 +174,8 @@ void MainWindow::applySettings(const AppSettings& s)
 }
 
 void MainWindow::overrideHardware(const HwConfig& hw) { m_player->engine().setHardware(hw); }
+
+void MainWindow::overrideGpuBudget(size_t bytes) { m_player->engine().setGpuMemoryBudget(bytes); }
 
 void MainWindow::reopenAll()
 {

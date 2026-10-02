@@ -12,6 +12,7 @@ AppSettings AppSettings::load()
     QSettings s;
     a.cacheMb = size_t(s.value(QStringLiteral("cache/ram_mb"), 0).toULongLong());
     a.hwdec = s.value(QStringLiteral("decode/hwdec"), a.hwdec).toString();
+    a.vramMb = size_t(s.value(QStringLiteral("cache/vram_mb"), 0).toULongLong());
     a.jumps.small = s.value(QStringLiteral("jump/small"), a.jumps.small).toDouble();
     a.jumps.large = s.value(QStringLiteral("jump/large"), a.jumps.large).toDouble();
     a.jumps.inFrames = s.value(QStringLiteral("jump/in_frames"), a.jumps.inFrames).toBool();
@@ -26,6 +27,7 @@ void AppSettings::save() const
     QSettings s;
     s.setValue(QStringLiteral("cache/ram_mb"), qulonglong(cacheMb));
     s.setValue(QStringLiteral("decode/hwdec"), hwdec);
+    s.setValue(QStringLiteral("cache/vram_mb"), qulonglong(vramMb));
     s.setValue(QStringLiteral("jump/small"), jumps.small);
     s.setValue(QStringLiteral("jump/large"), jumps.large);
     s.setValue(QStringLiteral("jump/in_frames"), jumps.inFrames);
@@ -58,6 +60,8 @@ HwConfig AppSettings::parseHwdec(const QString& value, bool* ok)
 }
 
 HwConfig AppSettings::hwConfig() const { return parseHwdec(hwdec); }
+
+size_t AppSettings::vramBytes() const { return vramMb ? vramMb << 20 : Engine::defaultGpuMemoryBudget(); }
 
 size_t AppSettings::cacheBytes() const { return cacheMb ? cacheMb << 20 : Engine::defaultMemoryBudget(); }
 

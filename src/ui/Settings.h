@@ -14,6 +14,7 @@ namespace scvp::ui {
 // Persistent user settings (QSettings: ~/.config/scvp/scvp.conf, the registry, or a plist).
 struct AppSettings {
     size_t cacheMb = 0;  // 0 = automatic (25 % of physical memory)
+    size_t vramMb = 0;   // 0 = automatic (40 % of the CUDA device's memory)
     QString hwdec = QStringLiteral("gpu");  // "gpu" (GPU first), "cpu", or a device name ("cuda", ...)
     JumpSettings jumps;
     KeyMap keys = KeyMap::defaults();
@@ -23,6 +24,7 @@ struct AppSettings {
     static AppSettings load();
     void save() const;
     size_t cacheBytes() const;  // resolved budget
+    size_t vramBytes() const;
     HwConfig hwConfig() const;
     static HwConfig parseHwdec(const QString& value, bool* ok = nullptr);
 };

@@ -36,6 +36,10 @@ struct SlotStats {
     uint64_t seeks = 0;
     uint64_t cancellations = 0;
     std::string hardwareDevice;  // "" = software decoding
+    size_t gpuFrames = 0;
+    size_t gpuBytes = 0;
+    size_t gpuBudgetBytes = 0;
+    uint64_t spills = 0;
     double indexProgress = 0;
     bool indexComplete = false;
 };
@@ -65,6 +69,10 @@ public:
     // Hardware decoding for videos opened from now on (default: GPU first).
     void setHardware(const HwConfig& hw);
     HwConfig hardware() const;
+    // Device-memory cache for frames decoded on a CUDA GPU (zero-copy display); 0 disables.
+    void setGpuMemoryBudget(size_t bytes);
+    size_t gpuMemoryBudget() const;
+    static size_t defaultGpuMemoryBudget();  // 40 % of the CUDA device's memory, 0 without CUDA
 
     void request(int slot, const PlaybackIntent& intent);
 
@@ -96,7 +104,9 @@ private:
         size_t frameBytesEstimate = 0;
         size_t frameBytesPlanned = 0;
         size_t cacheBudget = 0;
+        size_t gpuBudget = 0;
         int32_t capacity = 1;
+        bool onGpu = false;  // the lane decodes on CUDA, so the VRAM tier counts toward capacity
     };
 
     void rebalanceLocked();
@@ -109,6 +119,7 @@ private:
     std::array<std::unique_ptr<Slot>, kSlots> m_slots;
     uint64_t m_nextEpoch = 1;
     size_t m_budget;
+    size_t m_gpuBudget;
     HwConfig m_hw;
     std::function<void(int)> m_framesCb;
     std::function<void(int)> m_indexCb;

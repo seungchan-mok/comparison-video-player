@@ -26,6 +26,7 @@ public:
     double devicePixelRatioForView() const;
 
     const render::RenderTimings& lastTimings() const { return m_renderer.timings(); }
+    render::UploadPath uploadPath(int slot) const { return m_renderer.uploadPath(slot); }
     double lastPaintMs() const { return m_lastPaintMs; }
     QString renderError() const { return m_renderer.error(); }
 

@@ -51,6 +51,7 @@ bool Renderer::prepare(Slot& s, const FramePtr& frame, const ColorOverrides& ove
         if (s.interop.update(m_gl, *frame)) {
             source = &s.interop;
             m_timings.zeroCopy = true;
+            s.path = UploadPath::ZeroCopy;
         } else if (frame->gpu && frame->gpu->pool) {
             // No interop with this GPU: bring the pixels to system memory once.
             FramePool tmp("interop-fallback");
@@ -58,12 +59,15 @@ bool Renderer::prepare(Slot& s, const FramePtr& frame, const ColorOverrides& ove
             cpu.av = frame->gpu->pool->download(*frame->gpu, tmp);
             if (cpu.av) {
                 av_frame_copy_props(cpu.av, frame->av);
-                if (s.upload.update(m_gl, cpu))
+                if (s.upload.update(m_gl, cpu)) {
                     source = &s.upload;
+                    s.path = UploadPath::Download;
+                }
             }
         }
     } else if (s.upload.update(m_gl, *frame)) {
         source = &s.upload;
+        s.path = UploadPath::Upload;
     }
     if (!source) {
         m_error = QStringLiteral("cannot display pixel format %1").arg(QString::fromLatin1(av_get_pix_fmt_name(frame->format())));

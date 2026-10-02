@@ -62,6 +62,22 @@ std::shared_ptr<GpuFramePool> GpuFramePool::create(AVBufferRef* cudaDevice)
     return p;
 }
 
+std::shared_ptr<GpuFramePool> GpuFramePool::forDevice(AVBufferRef* cudaDevice)
+{
+    static std::mutex mutex;
+    static std::vector<std::shared_ptr<GpuFramePool>> pools;
+    if (!cudaDevice)
+        return nullptr;
+    std::lock_guard<std::mutex> lock(mutex);
+    for (const auto& p : pools)
+        if (p->m_device && p->m_device->data == cudaDevice->data)
+            return p;
+    auto p = create(cudaDevice);
+    if (p)
+        pools.push_back(p);
+    return p;
+}
+
 GpuFramePool::~GpuFramePool()
 {
     trim();
@@ -94,9 +110,19 @@ std::shared_ptr<const GpuBlock> GpuFramePool::allocate(AVPixelFormat format, int
         cuda::ScopedContext ctx(m_ctx);
         if (!ctx.ok())
             return nullptr;
-        const CUresult r = cuda::api()->cuMemAllocPitch(&b->base, &b->pitch, g.maxWidth, g.totalRows, 16);
+        CUresult r = cuda::api()->cuMemAllocPitch(&b->base, &b->pitch, g.maxWidth, g.totalRows, 16);
         if (r != 0) {
-            SCVP_WARN("cuMemAllocPitch(%zu x %zu): %s", g.maxWidth, g.totalRows, cuda::errorName(r));
+            // Out of device memory (other applications use the GPU too): give back recycled
+            // blocks and try once more before reporting failure.
+            trim();
+            r = cuda::api()->cuMemAllocPitch(&b->base, &b->pitch, g.maxWidth, g.totalRows, 16);
+        }
+        if (r != 0) {
+            const uint64_t n = m_failures.fetch_add(1) + 1;
+            if (n == 1 || n % 500 == 0)
+                SCVP_WARN("cuMemAllocPitch(%zu x %zu): %s (%llu failures; frames go to system memory)", g.maxWidth,
+                          g.totalRows, cuda::errorName(r), (unsigned long long)n);
+            b->base = 0;
             return nullptr;
         }
     }

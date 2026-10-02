@@ -20,6 +20,8 @@ struct LaneStats {
     std::atomic<uint64_t> seeks{0};
     std::atomic<uint64_t> cancellations{0};
     std::atomic<uint64_t> errors{0};
+    std::atomic<uint64_t> gpuFrames{0};  // frames kept in device memory
+    std::atomic<uint64_t> spills{0};     // device frames copied down to system memory
 };
 
 // Worker thread that keeps one video's cache filled with what the latest WantList asks for.
@@ -63,6 +65,7 @@ private:
     int32_t lastMissing(int32_t first, int32_t last) const;
     bool continueBeatsSeek(const SeekPoint& key, int32_t frame, const FrameIndex& idx) const;
     void markUnreachable(int32_t first, int32_t last);
+    void spillToRam(const FramePtr& gpuFrame);
 
     IVideoSource& m_source;
     FrameCache& m_cache;
@@ -74,6 +77,7 @@ private:
     std::atomic<bool> m_stop{false};
     LaneStats m_stats;
     std::atomic<size_t> m_frameBytes{0};
+    std::atomic<size_t> m_gpuFrameBytes{0};
     bool m_forceSeek = false;
     // Frames the decoder cannot produce (corrupt or dropped); skipped until the index changes.
     std::set<int32_t> m_unreachable;

@@ -1,5 +1,6 @@
 #include "engine/FFmpegSource.h"
 
+#include "engine/GpuFrame.h"
 #include "engine/HwDevice.h"
 #include "engine/Log.h"
 
@@ -211,17 +212,31 @@ public:
                 return DecodeStatus::Error;
             int ret = avcodec_receive_frame(m_ctx.get(), m_frame.get());
             if (ret == 0) {
-                if (m_frame->format == m_hwPixFmt && m_hwPixFmt != AV_PIX_FMT_NONE && !download()) {
+                const bool hwFrame = m_frame->format == m_hwPixFmt && m_hwPixFmt != AV_PIX_FMT_NONE;
+                const Label lb = label();
+                if (lb.pres < 0) {
+                    av_frame_unref(m_frame.get());
+                    continue;  // a frame that is never shown
+                }
+                if (m_gpuBackoff > 0)
+                    --m_gpuBackoff;
+                if (hwFrame && hints.keepOnGpu && m_hwType == AV_HWDEVICE_TYPE_CUDA && m_gpuBackoff == 0 &&
+                    (*hints.keepOnGpu)(lb.pres)) {
+                    if (FramePtr g = keepOnDevice(lb)) {
+                        m_hwErrors = 0;
+                        out = std::move(g);
+                        return DecodeStatus::Ok;
+                    }
+                    m_gpuBackoff = 64;  // device memory is short: download for a while
+                }
+                if (hwFrame && !download()) {
                     av_frame_unref(m_frame.get());
                     if (++m_hwErrors >= 3)
                         m_hwFailed = true;
                     continue;
                 }
                 m_hwErrors = 0;
-                FramePtr f = labelFrame();
-                if (!f)
-                    continue;  // a frame that is never shown
-                out = std::move(f);
+                out = finish(lb);
                 return DecodeStatus::Ok;
             }
             if (ret == AVERROR_EOF) {
@@ -440,14 +455,19 @@ private:
         return true;
     }
 
-    FramePtr labelFrame()
+    struct Label {
+        int32_t dec = -1;
+        int32_t pres = -1;
+        bool provisional = false;
+    };
+
+    // The frame number of m_frame, from its packet tag (cross-checked with pts) and the index.
+    Label label()
     {
+        Label lb;
         const intptr_t tag = reinterpret_cast<intptr_t>(m_frame->opaque);
         int32_t dec = tag > 0 ? int32_t(tag - 1) : -1;
         FrameIndexPtr idx = m_source.index();
-        int32_t pres = -1;
-        bool provisional = false;
-        int32_t taggedDec = dec;
         if (idx && dec >= 0 && dec < idx->packetCount() && m_frame->pts != AV_NOPTS_VALUE &&
             idx->ordering() == FrameIndex::Ordering::Pts) {
             // Some decoders re-output an earlier picture with that picture's packet tag (AV1
@@ -456,50 +476,79 @@ private:
             if (ip.pts != m_frame->pts) {
                 const int32_t byPts = idx->presForPts(m_frame->pts, ip.pres);
                 if (byPts >= 0)
-                    taggedDec = idx->decodeFromPres(byPts);
+                    dec = idx->decodeFromPres(byPts);
             }
         }
-        dec = taggedDec;
+        int32_t pres = -1;
+        bool provisional = false;
         if (idx && dec >= 0 && dec < idx->packetCount()) {
             const IndexPacket& ip = idx->packet(dec);
             pres = ip.pres;
             if (pres < 0 && ip.shown()) {
-                // Not yet final in a partial index.
-                provisional = true;
+                provisional = true;  // not yet final in a partial index
                 pres = idx->estimatePres(ip.pts);
             } else if (pres < 0) {
                 ++m_mismatches;  // the index says this packet is never shown
                 SCVP_DEBUG("%s: decoder output a frame for hidden packet %d", m_path.c_str(), dec);
-                av_frame_unref(m_frame.get());
-                return nullptr;
+                return lb;
             }
         } else {
             provisional = true;
             const int64_t pts = m_frame->pts != AV_NOPTS_VALUE ? m_frame->pts : m_frame->best_effort_timestamp;
             pres = idx ? idx->estimatePres(pts) : -1;
         }
-        if (pres < 0) {
-            av_frame_unref(m_frame.get());
-            return nullptr;
-        }
+        if (pres < 0)
+            return lb;
         if (!provisional && m_lastPres >= 0 && pres != m_lastPres + 1) {
             ++m_mismatches;
             SCVP_DEBUG("%s: frame %d followed %d", m_path.c_str(), pres, m_lastPres);
         }
         m_lastPres = pres;
+        lb.dec = dec;
+        lb.pres = pres;
+        lb.provisional = provisional;
+        return lb;
+    }
 
+    void stamp(Frame& f, const Label& lb, const AVFrame* src) const
+    {
+        f.pres = lb.pres;
+        f.dec = lb.dec;
+        f.pts = src->pts;
+        f.key = ff::frameIsKey(src);
+        f.pictType = av_get_picture_type_char(src->pict_type);
+        f.provisional = lb.provisional;
+    }
+
+    // System-memory frame from m_frame (software output or a downloaded surface).
+    FramePtr finish(const Label& lb)
+    {
         auto f = std::make_shared<Frame>();
         f->av = av_frame_alloc();
         av_frame_move_ref(f->av, m_frame.get());
-        f->pres = pres;
-        f->dec = dec;
-        f->pts = f->av->pts;
-        f->key = ff::frameIsKey(f->av);
-        f->pictType = av_get_picture_type_char(f->av->pict_type);
-        f->provisional = provisional;
+        stamp(*f, lb, f->av);
         f->hardware = m_downloaded;
         m_downloaded = false;
         f->bytes = ff::frameBufferBytes(f->av);
+        return f;
+    }
+
+    // Device-memory frame: the decoder surface copied into a VRAM block (D2D), then released.
+    FramePtr keepOnDevice(const Label& lb)
+    {
+        if (!m_gpuPool) {
+            AVBufferRef* dev = m_ctx->hw_device_ctx;
+            m_gpuPool = GpuFramePool::forDevice(dev);
+            if (!m_gpuPool)
+                return nullptr;
+        }
+        auto block = m_gpuPool->copyFrom(m_frame.get());
+        if (!block)
+            return nullptr;
+        auto f = makeGpuFrame(std::move(block), m_frame.get());
+        stamp(*f, lb, m_frame.get());
+        f->hardware = true;
+        av_frame_unref(m_frame.get());
         return f;
     }
 
@@ -526,6 +575,8 @@ private:
     std::atomic<bool> m_hwFailed{false};
     int m_hwErrors = 0;
     bool m_downloaded = false;
+    std::shared_ptr<GpuFramePool> m_gpuPool;
+    int m_gpuBackoff = 0;
 };
 
 VideoInfo describe(const std::string& path, const Demuxer& d)

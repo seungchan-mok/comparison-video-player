@@ -59,6 +59,8 @@ int main(int argc, char* argv[])
     parser.addPositionalArgument(QStringLiteral("A"), QStringLiteral("Video to open (slot A)"), QStringLiteral("[A]"));
     QCommandLineOption cacheMb(QStringLiteral("cache-mb"), QStringLiteral("Decoded frame cache budget for this run (MB)."), QStringLiteral("MB"));
     parser.addOption(cacheMb);
+    QCommandLineOption vramMb(QStringLiteral("vram-mb"), QStringLiteral("GPU frame cache for this run (MB, 0 disables)."), QStringLiteral("MB"));
+    parser.addOption(vramMb);
     QCommandLineOption hwdec(QStringLiteral("hwdec"), QStringLiteral("Decoding for this run: gpu (default), cpu, or a device (cuda, vaapi, d3d11va, videotoolbox)."), QStringLiteral("mode"));
     parser.addOption(hwdec);
     // Deterministic end-to-end checks on a virtual display (scripts/xvfb-run.sh).
@@ -81,6 +83,8 @@ int main(int argc, char* argv[])
     scvp::ui::MainWindow window;
     if (parser.isSet(cacheMb))
         window.overrideCacheBudget(size_t(parser.value(cacheMb).toULongLong()) << 20);
+    if (parser.isSet(vramMb))
+        window.overrideGpuBudget(size_t(parser.value(vramMb).toULongLong()) << 20);
     if (parser.isSet(hwdec)) {
         bool ok = false;
         const scvp::HwConfig hw = scvp::ui::AppSettings::parseHwdec(parser.value(hwdec), &ok);

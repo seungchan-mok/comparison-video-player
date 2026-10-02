@@ -53,6 +53,9 @@ struct DecodeHints {
     // Finer alternative (takes precedence): non-key packets whose frame is not needed are
     // decoded with AVDISCARD_NONREF.
     const std::function<bool(int32_t frame)>* frameNeeded = nullptr;
+    // Frames decoded on a CUDA device stay in device memory when this returns true for them
+    // (zero-copy display); otherwise they are downloaded to system memory.
+    const std::function<bool(int32_t frame)>* keepOnGpu = nullptr;
     // Decoding stops with Cancelled as soon as *cancel != generation.
     const std::atomic<uint64_t>* cancel = nullptr;
     uint64_t generation = 0;

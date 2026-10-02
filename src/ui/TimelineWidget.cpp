@@ -16,6 +16,8 @@ constexpr double kHandle = 4.0;
 const QColor kTrack(48, 52, 58);
 const QColor kCachedA(56, 150, 168);
 const QColor kCachedB(214, 150, 54);
+const QColor kCachedAGpu(110, 214, 232);  // frames held in video memory: brighter
+const QColor kCachedBGpu(255, 200, 110);
 const QColor kLoop(255, 255, 255, 38);
 const QColor kLoopEdge(240, 240, 240);
 const QColor kPlayhead(239, 72, 102);
@@ -123,9 +125,9 @@ void TimelineWidget::paintEvent(QPaintEvent*)
             continue;
         const double y = both ? (s == 0 ? t.top() : t.center().y()) : t.top();
         const double h = both ? t.height() / 2.0 : t.height();
-        p.setBrush(s == 0 ? kCachedA : kCachedB);
         const int64_t off = m_model->slotOffset(s);
         for (const FrameRange& fr : r->ranges) {
+            p.setBrush(s == 0 ? (fr.gpu ? kCachedAGpu : kCachedA) : (fr.gpu ? kCachedBGpu : kCachedB));
             const double x0 = t.left() + double(fr.first - off) / double(n) * t.width();
             const double x1 = t.left() + double(fr.last + 1 - off) / double(n) * t.width();
             if (x1 < t.left() || x0 > t.right())

@@ -1,6 +1,9 @@
 #include "ui/HudOverlay.h"
 
 #include "ui/Player.h"
+#include "ui/VideoView.h"
+
+#include "engine/GpuFrame.h"
 
 #include <QEvent>
 #include <QFileInfo>
@@ -65,6 +68,17 @@ void HudOverlay::setStalled(bool stalled)
     }
 }
 
+QString HudOverlay::pathText(int slot) const
+{
+    auto* view = qobject_cast<const VideoView*>(parentWidget());
+    switch (view ? view->uploadPath(slot) : render::UploadPath::None) {
+    case render::UploadPath::ZeroCopy: return QStringLiteral(", to screen: zero-copy");
+    case render::UploadPath::Download: return QStringLiteral(", to screen: download (GL on another GPU)");
+    case render::UploadPath::Upload: return QStringLiteral(", to screen: upload");
+    default: return QString();
+    }
+}
+
 QStringList HudOverlay::lines() const
 {
     QStringList out;
@@ -90,8 +104,16 @@ QStringList HudOverlay::lines() const
             frameLine += QStringLiteral("  decoding...");
         }
         out << frameLine;
-        out << QStringLiteral("   decoder %1").arg(st.hardwareDevice.empty() ? QStringLiteral("software")
-                                                                       : QString::fromStdString(st.hardwareDevice));
+        QString decoder = QStringLiteral("   decoder %1").arg(st.hardwareDevice.empty() ? QStringLiteral("software")
+                                                                                 : QString::fromStdString(st.hardwareDevice));
+        if (st.gpuBudgetBytes && !st.hardwareDevice.empty())
+            decoder += QStringLiteral("  VRAM %1 frames %2 / %3 MB, %4 spilled%5")
+                           .arg(st.gpuFrames)
+                           .arg(st.gpuBytes >> 20)
+                           .arg(st.gpuBudgetBytes >> 20)
+                           .arg(st.spills)
+                           .arg(pathText(slot));
+        out << decoder;
         out << QStringLiteral("   cache %1 frames %2 MB / %3 MB, %4 decoded, %5 seeks%6")
                    .arg(st.cachedFrames)
                    .arg(st.cachedBytes >> 20)

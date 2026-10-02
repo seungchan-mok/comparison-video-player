@@ -1,5 +1,6 @@
 #include "engine/Engine.h"
 
+#include "engine/GpuFrame.h"
 #include "engine/Log.h"
 #include "engine/PrefetchPlanner.h"
 
@@ -44,7 +45,35 @@ size_t estimateFrameBytes(const VideoInfo& info)
 
 Engine::Engine()
     : m_budget(defaultMemoryBudget())
+    , m_gpuBudget(size_t(-1))  // resolved lazily (creating the CUDA device takes time)
 {
+}
+
+size_t Engine::defaultGpuMemoryBudget()
+{
+    static const size_t budget = [] {
+        AVBufferRef* dev = HwDevices::instance().get(AV_HWDEVICE_TYPE_CUDA);
+        auto pool = GpuFramePool::forDevice(dev);
+        av_buffer_unref(&dev);
+        size_t freeB = 0, total = 0;
+        if (!pool || !pool->memoryInfo(&freeB, &total))
+            return size_t(0);
+        return std::min(total / 10 * 4, freeB / 10 * 8);
+    }();
+    return budget;
+}
+
+void Engine::setGpuMemoryBudget(size_t bytes)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_gpuBudget = bytes;
+    rebalanceLocked();
+}
+
+size_t Engine::gpuMemoryBudget() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_gpuBudget == size_t(-1) ? defaultGpuMemoryBudget() : m_gpuBudget;
 }
 
 Engine::~Engine()
@@ -171,6 +200,25 @@ void Engine::rebalanceLocked()
             total += frameBytesOf(*s);
     if (!total)
         return;
+    // CPU-only decoding never touches CUDA (a context alone costs a few hundred MB of VRAM).
+    // A requested GPU budget is capped by what is actually free on the device (other
+    // applications share it), counting what our caches already hold.
+    size_t gpuBudgetTotal = m_hw.policy == HwPolicy::Off ? 0 : m_gpuBudget == size_t(-1) ? defaultGpuMemoryBudget() : m_gpuBudget;
+    if (gpuBudgetTotal) {
+        AVBufferRef* dev = HwDevices::instance().get(AV_HWDEVICE_TYPE_CUDA);
+        auto pool = GpuFramePool::forDevice(dev);
+        av_buffer_unref(&dev);
+        size_t freeB = 0, totalB = 0;
+        if (pool && pool->memoryInfo(&freeB, &totalB)) {
+            size_t held = pool->cachedBytes();
+            for (const auto& s : m_slots)
+                if (s)
+                    held += s->cache->gpuBytes();
+            gpuBudgetTotal = std::min(gpuBudgetTotal, (freeB + held) / 10 * 9);
+        } else {
+            gpuBudgetTotal = 0;
+        }
+    }
     for (auto& s : m_slots) {
         if (!s)
             continue;
@@ -180,9 +228,12 @@ void Engine::rebalanceLocked()
         const size_t reserveFrames = size_t(idx ? idx->reorderDepth() : 4) + 20;
         const size_t reserve = std::min(share / 2, reserveFrames * fb);
         s->cacheBudget = std::max(fb, share - reserve);
-        s->capacity = int32_t(std::max<size_t>(1, s->cacheBudget / fb));
+        const size_t gpuTotal = gpuBudgetTotal;
+        s->gpuBudget = size_t(double(gpuTotal) * double(fb) / double(total));
+        s->capacity = int32_t(std::max<size_t>(1, s->cacheBudget / fb + (s->onGpu ? s->gpuBudget / fb : 0)));
         s->frameBytesPlanned = fb;
         s->cache->setBudget(s->cacheBudget);
+        s->cache->setGpuBudget(s->gpuBudget);
         s->pool->setCacheLimit(std::min<size_t>(s->cacheBudget / 8, size_t(512) << 20));
         replanLocked(*s);
     }
@@ -285,6 +336,10 @@ SlotStats Engine::stats(int slot) const
     st.seeks = s->lane->stats().seeks.load();
     st.cancellations = s->lane->stats().cancellations.load();
     st.hardwareDevice = s->lane->hardwareDevice();
+    st.gpuFrames = s->cache->gpuFrames();
+    st.gpuBytes = s->cache->gpuBytes();
+    st.gpuBudgetBytes = s->gpuBudget;
+    st.spills = s->lane->stats().spills.load();
     st.indexProgress = s->source->indexProgress();
     st.indexComplete = s->source->indexComplete();
     return st;
@@ -310,10 +365,16 @@ void Engine::onFrames(int slot, uint64_t epoch)
         Slot* s = m_slots[size_t(slot)].get();
         if (!s || s->epoch != epoch)
             return;
-        // The first decoded frames replace the size estimate the budget split was based on.
+        // The first decoded frames replace the size estimate the budget split was based on, and
+        // tell whether the VRAM tier is in use.
         const size_t fb = s->lane->frameBytes();
-        if (fb && (fb > s->frameBytesPlanned * 9 / 8 || fb < s->frameBytesPlanned * 7 / 8))
+        const bool onGpu = s->lane->hardwareDevice() == "cuda" && s->gpuBudget > 0;
+        if (onGpu != s->onGpu) {
+            s->onGpu = onGpu;
             rebalanceLocked();
+        } else if (fb && (fb > s->frameBytesPlanned * 9 / 8 || fb < s->frameBytesPlanned * 7 / 8)) {
+            rebalanceLocked();
+        }
         cb = m_framesCb;
     }
     if (cb)
