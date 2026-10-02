@@ -1,9 +1,12 @@
 #pragma once
 
+#include "ui/KeyMap.h"
+
 #include <QMainWindow>
 
 namespace scvp::ui {
 
+class KeyRouter;
 class Player;
 class VideoView;
 
@@ -17,14 +20,15 @@ public:
     Player* player() const { return m_player; }
     VideoView* view() const { return m_view; }
 
-protected:
-    void keyPressEvent(QKeyEvent* e) override;
+    void handleAction(Action a, bool autoRepeat);
+    void toggleFullscreen();
 
 private:
     void updateTitle();
 
     VideoView* m_view;
     Player* m_player;
+    KeyRouter* m_keys;
 };
 
 } // namespace scvp::ui

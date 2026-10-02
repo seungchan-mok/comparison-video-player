@@ -1,6 +1,8 @@
 add_library(scvp_ui STATIC
     EngineBridge.h EngineBridge.cpp
     FramePacer.h FramePacer.cpp
+    KeyMap.h KeyMap.cpp
+    KeyRouter.h KeyRouter.cpp
     MainWindow.h MainWindow.cpp
     Player.h Player.cpp
     VideoView.h VideoView.cpp
