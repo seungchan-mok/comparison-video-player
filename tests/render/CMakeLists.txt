@@ -6,3 +6,5 @@ if(UNIX AND NOT APPLE)
     set_tests_properties(tst_rgbconverter.mesa PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;__GLX_VENDOR_LIBRARY_NAME=mesa;LIBGL_ALWAYS_SOFTWARE=1")
 endif()
+scvp_add_test(tst_viewtransform tst_viewtransform.cpp LIBS scvp::render)
+scvp_add_test(tst_display tst_display.cpp LIBS scvp_gltestsupport)
