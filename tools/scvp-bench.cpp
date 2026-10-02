@@ -9,8 +9,11 @@
 // random    jumps to frames outside the cache: latency until the target is shown
 // backstep  stepping backwards with a think time between key presses (key repeat ~33 ms)
 // cached    lookup cost of frames already in the cache
+// lockstep  with --with B: both videos through the PlaybackController (pairs only when both
+//           frames are decoded): pair throughput, then real-time playback stalls
 
 #include "engine/Engine.h"
+#include "engine/PlaybackController.h"
 
 #include <algorithm>
 #include <chrono>
@@ -93,6 +96,7 @@ PlaybackIntent paused(int32_t p, int dir = 1)
 
 struct Options {
     std::string file;
+    std::string with;  // second video (lockstep)
     std::string scenario = "all";
     size_t budgetMb = 0;
     int jumps = 30;
@@ -136,7 +140,7 @@ int usage()
     std::fprintf(stderr,
                  "usage: scvp-bench FILE [--scenario all|open|seq|realtime|random|backstep|cached]\n"
                  "                  [--budget-mb N] [--jumps N] [--steps N] [--think-ms N] [--seconds N]\n"
-                 "                  [--request-every N] [--hw gpu|cpu|cuda|vaapi|...] [--vram-mb N] [--json]\n");
+                 "                  [--request-every N] [--hw gpu|cpu|cuda|vaapi|...] [--vram-mb N] [--with B] [--json]\n");
     return 2;
 }
 
@@ -175,6 +179,9 @@ int main(int argc, char** argv)
         } else if (a == "--hw") {
             if (const char* v = next())
                 o.hw = v;
+        } else if (a == "--with") {
+            if (const char* v = next())
+                o.with = v;
         } else if (a == "--json") {
             o.json = true;
         } else if (!a.empty() && a[0] == '-') {
@@ -261,6 +268,82 @@ int main(int argc, char** argv)
                       (unsigned long long)(after.seeks - before.seeks));
         std::snprintf(j, sizeof(j), "{\"frames\": %d, \"ms\": %.3f, \"fps\": %.3f}", got, ms, got * 1000.0 / ms);
         report(o, "seq", h, j);
+    }
+
+    // --- lockstep: two videos through the playback controller -------------------------------
+    if (!o.with.empty() && (o.scenario == "all" || o.scenario == "lockstep")) {
+        if (!engine.open(1, o.with, InputOptions{}, &err)) {
+            std::fprintf(stderr, "open B failed: %s\n", err.c_str());
+            return 1;
+        }
+        while (!engine.stats(1).indexComplete)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        EngineBackend backend(engine);
+        PlaybackController c(backend);
+        c.mediaChanged();
+        const int64_t count = std::min<int64_t>(c.length(), 1200);
+        // Pair throughput: the clock jumps ahead, so only decoding limits the rate.
+        c.seek(0);
+        c.play();
+        double now = 0;
+        const auto ts = Clock::now();
+        c.tick(now);
+        while (c.position() < count - 1 && msSince(ts) < 120000) {
+            const int64_t next = c.position() + 1;
+            waiter.wait(0, int32_t(next), 2000);
+            waiter.wait(1, int32_t(next), 2000);
+            c.tick(now += 1.0);
+        }
+        const double ms = msSince(ts);
+        char h[200], j[200];
+        std::snprintf(h, sizeof(h), "%lld pairs in %.1f ms = %.1f pairs/s", (long long)c.position(), ms, double(c.position()) * 1000.0 / ms);
+        std::snprintf(j, sizeof(j), "{\"pairs\": %lld, \"ms\": %.3f, \"pairs_per_s\": %.3f}", (long long)c.position(), ms,
+                      double(c.position()) * 1000.0 / ms);
+        report(o, "lockstep", h, j);
+        if (!o.json)
+            for (int sl = 0; sl < 2; ++sl) {
+                const SlotStats st = engine.stats(sl);
+                std::printf("           %c: %llu decoded, %llu seeks, %llu cancelled, %zu cached, capacity %d\n", sl ? 'B' : 'A',
+                            (unsigned long long)st.framesDecoded, (unsigned long long)st.seeks, (unsigned long long)st.cancellations,
+                            st.cachedFrames, st.capacityFrames);
+            }
+
+        // Real time from a cold cache: reopen both, then tick every millisecond on the wall clock.
+        c.pause();
+        engine.close(0);
+        engine.close(1);
+        if (!engine.open(0, o.file, InputOptions{}, &err) || !engine.open(1, o.with, InputOptions{}, &err)) {
+            std::fprintf(stderr, "reopen failed: %s\n", err.c_str());
+            return 1;
+        }
+        while (!engine.stats(0).indexComplete || !engine.stats(1).indexComplete)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        c.mediaChanged();
+        c.seek(0);
+        waiter.wait(0, 0);
+        waiter.wait(1, 0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        c.play();
+        const auto t1 = Clock::now();
+        int stalls = 0;
+        double stalledMs = 0;
+        bool wasStalled = false;
+        const int64_t frames = std::min<int64_t>(c.length(), int64_t(o.seconds * c.frameRate()));
+        while (c.playing() && c.position() < frames - 1) {
+            const TickResult r = c.tick(msSince(t1) / 1000.0);
+            if (r.stalled && !wasStalled)
+                ++stalls;
+            if (r.stalled)
+                stalledMs += 1.0;
+            wasStalled = r.stalled;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        std::snprintf(h, sizeof(h), "%lld pairs at %.2f fps in %.1f s: %d stalls, ~%.0f ms stalled", (long long)frames, c.frameRate(),
+                      msSince(t1) / 1000.0, stalls, stalledMs);
+        std::snprintf(j, sizeof(j), "{\"pairs\": %lld, \"stalls\": %d, \"stall_ms\": %.1f}", (long long)frames, stalls, stalledMs);
+        report(o, "lockstep-rt", h, j);
+        c.pause();
+        engine.close(1);
     }
 
     // --- realtime: paced playback --------------------------------------------------------
