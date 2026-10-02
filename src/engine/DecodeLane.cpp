@@ -27,7 +27,18 @@ bool DecodeLane::start(std::string* error)
     m_session = m_source.openSession(m_cfg, error);
     if (!m_session)
         return false;
-    m_thread = std::thread([this] { run(); });
+    const SourceCaps caps = m_source.caps();
+    m_parallel = caps.randomAccess && caps.maxSessions > 1;
+    if (!m_parallel) {
+        m_thread = std::thread([this] { run(); });
+        return true;
+    }
+    for (int i = 1; i < caps.maxSessions; ++i)
+        if (auto s = m_source.openSession(m_cfg, nullptr))
+            m_extraSessions.push_back(std::move(s));
+    m_thread = std::thread([this] { runParallel(m_session.get()); });
+    for (auto& s : m_extraSessions)
+        m_extraThreads.emplace_back([this, p = s.get()] { runParallel(p); });
     return true;
 }
 
@@ -37,6 +48,10 @@ void DecodeLane::stop()
     m_mailbox.close();
     if (m_thread.joinable())
         m_thread.join();
+    for (std::thread& t : m_extraThreads)
+        if (t.joinable())
+            t.join();
+    m_extraThreads.clear();
 }
 
 int32_t DecodeLane::firstMissing(int32_t first, int32_t last) const
@@ -263,6 +278,78 @@ std::string DecodeLane::hardwareDevice() const
 {
     std::lock_guard<std::mutex> lock(m_describeMutex);
     return m_hwDevice;
+}
+
+// The most urgent frame no worker has yet: wants in priority order, each in its fill direction.
+int32_t DecodeLane::claimNext(const WantList& w, const FrameIndex& idx)
+{
+    const int32_t n = idx.frameCount();
+    std::lock_guard<std::mutex> lock(m_claimMutex);
+    auto free = [&](int32_t f) { return !m_cache.contains(f) && !m_claimed.count(f) && !m_unreachable.count(f); };
+    for (const Want& want : w.wants) {
+        const int32_t lo = std::max(want.range.first, 0);
+        const int32_t hi = std::min(want.range.last, n - 1);
+        if (want.fill >= 0) {
+            for (int32_t f = lo; f <= hi;) {
+                const int32_t m = m_cache.firstMissing(f, hi);
+                if (m < 0)
+                    break;
+                if (free(m)) {
+                    m_claimed.insert(m);
+                    return m;
+                }
+                f = m + 1;
+            }
+        } else {
+            for (int32_t f = hi; f >= lo;) {
+                const int32_t m = m_cache.lastMissing(lo, f);
+                if (m < 0)
+                    break;
+                if (free(m)) {
+                    m_claimed.insert(m);
+                    return m;
+                }
+                f = m - 1;
+            }
+        }
+    }
+    return -1;
+}
+
+void DecodeLane::runParallel(IDecodeSession* session)
+{
+    platform::setCurrentThreadName("scvp-decode");
+    uint64_t seenNudges = m_mailbox.nudges();
+    while (!m_stop.load()) {
+        const WantList w = m_mailbox.snapshot();
+        if (m_mailbox.closed())
+            break;
+        FrameIndexPtr idx = m_source.index();
+        const int32_t f = idx && !w.wants.empty() ? claimNext(w, *idx) : -1;
+        if (f < 0) {
+            m_mailbox.wait(w.generation, seenNudges, std::chrono::milliseconds(250));
+            continue;
+        }
+        FramePtr frame;
+        DecodeStatus st = session->seekTo(idx->seekPointFor(f));
+        if (st == DecodeStatus::Ok)
+            st = session->next(frame, DecodeHints{});
+        if (st == DecodeStatus::Ok && frame) {
+            m_stats.framesDecoded.fetch_add(1, std::memory_order_relaxed);
+            m_frameBytes.store(frame->bytes, std::memory_order_relaxed);
+            if (m_cache.offer(std::move(frame))) {
+                m_stats.framesCached.fetch_add(1, std::memory_order_relaxed);
+                if (m_onFrames)
+                    m_onFrames();
+            }
+        } else {
+            m_stats.errors.fetch_add(1, std::memory_order_relaxed);
+        }
+        std::lock_guard<std::mutex> lock(m_claimMutex);
+        m_claimed.erase(f);
+        if (st != DecodeStatus::Ok)
+            m_unreachable.insert(f);
+    }
 }
 
 void DecodeLane::run()

@@ -19,7 +19,8 @@ public:
     FrameIndexPtr index() const override { return m_index; }
     bool indexComplete() const override { return true; }
     double indexProgress() const override { return 1.0; }
-    SourceCaps caps() const override { return {true, 4}; }
+    // Image decoders are single-threaded: decode several files at once.
+    SourceCaps caps() const override;
     std::unique_ptr<IDecodeSession> openSession(const SessionConfig& cfg, std::string* error) override;
     bool waitForIndex(int) override { return true; }
     void setIndexListener(std::function<void()>) override {}

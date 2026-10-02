@@ -11,6 +11,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace scvp {
 
@@ -30,6 +31,10 @@ struct LaneStats {
 // packets; frames before the wanted one are decoded with AVDISCARD_NONREF. A newer WantList
 // cancels the current decode within a frame; since the decoder state survives, the next pick
 // continues without seeking whenever that is cheaper.
+//
+// Random-access sources (raw video, image sequences: every frame decodes alone) instead run
+// several workers, each with its own session, that claim the most urgent missing frames one at
+// a time, so slow per-frame decoders (4K PNG) still keep up with playback.
 class DecodeLane {
 public:
     using FramesFn = std::function<void()>;
@@ -59,6 +64,8 @@ private:
     };
 
     void run();
+    void runParallel(IDecodeSession* session);
+    int32_t claimNext(const WantList& w, const FrameIndex& idx);
     std::optional<Task> pick(const WantList& w, const FrameIndex& idx);
     void exec(const Task& t, const FrameIndex& idx, uint64_t generation);
     int32_t firstMissing(int32_t first, int32_t last) const;
@@ -74,6 +81,11 @@ private:
     FramesFn m_onFrames;
     std::unique_ptr<IDecodeSession> m_session;
     std::thread m_thread;
+    std::vector<std::unique_ptr<IDecodeSession>> m_extraSessions;  // parallel workers 2..n
+    std::vector<std::thread> m_extraThreads;
+    bool m_parallel = false;
+    std::mutex m_claimMutex;  // parallel mode: m_claimed and m_unreachable
+    std::set<int32_t> m_claimed;
     std::atomic<bool> m_stop{false};
     LaneStats m_stats;
     std::atomic<size_t> m_frameBytes{0};

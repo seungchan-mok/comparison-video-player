@@ -6,6 +6,7 @@
 #include <cctype>
 #include <filesystem>
 #include <map>
+#include <thread>
 
 namespace scvp {
 namespace fs = std::filesystem;
@@ -308,6 +309,12 @@ std::unique_ptr<ImageSequenceSource> ImageSequenceSource::open(const std::string
     }
     src->m_index = b.build(true);
     return src;
+}
+
+SourceCaps ImageSequenceSource::caps() const
+{
+    const int cores = int(std::max(1u, std::thread::hardware_concurrency()));
+    return {true, std::clamp(cores / 2, 1, 8)};
 }
 
 std::unique_ptr<IDecodeSession> ImageSequenceSource::openSession(const SessionConfig& cfg, std::string*)
