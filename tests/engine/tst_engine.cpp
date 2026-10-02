@@ -138,8 +138,14 @@ private slots:
         const double perStep = double(o.engine.stats(0).framesDecoded - decodedBefore) / steps;
         qInfo("capacity %d frames: %.2f decoded frames per backward step, %llu seeks", cap, perStep,
               (unsigned long long)o.engine.stats(0).seeks);
-        if (cap >= 2 * gop + 8)
-            QVERIFY(perStep < 3.0);
+        // The bounds below are what a regression in the backward-fill logic breaks first.
+        const uint64_t seeks = o.engine.stats(0).seeks;
+        if (cap >= o.frames) {
+            // Everything fits: each GOP is decoded exactly once, one seek per GOP.
+            QVERIFY2(perStep < 1.1, qPrintable(QString::number(perStep)));
+            QVERIFY2(seeks <= uint64_t(o.frames / gop + 2), qPrintable(QString::number(seeks)));
+        } else if (cap >= 2 * gop + 8)
+            QVERIFY(perStep < 1.5);
         else if (cap >= gop)
             QVERIFY(perStep < 8.0);
         else

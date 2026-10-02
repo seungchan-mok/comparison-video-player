@@ -109,7 +109,12 @@ std::optional<DecodeLane::Task> DecodeLane::pick(const WantList& w, const FrameI
             if (t.last < 0)
                 continue;
             const SeekPoint k = idx.seekPointFor(t.last);
-            t.first = std::clamp(std::max(k.pres, planLow), 0, t.last);
+            const int32_t spanStart = std::clamp(std::max(k.pres, planLow), 0, t.last);
+            // Resume where an interrupted pass over this span stopped instead of restarting at
+            // the key (every key press cancels the in-flight pass).
+            t.first = firstMissing(spanStart, t.last);
+            if (t.first < 0)
+                t.first = t.last;
         }
         // A target reached by a forward move or jump skips the frames below it (latency first;
         // a later backward pass fills that span). Everything else decodes what the plan wants.
