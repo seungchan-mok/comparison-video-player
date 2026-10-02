@@ -191,6 +191,8 @@ void FrameIndexBuilder::add(const IndexPacket& in)
     IndexPacket p = in;
     if (p.pts == AV_NOPTS_VALUE)
         ++m_missingPts;
+    else if (m_maxPts == AV_NOPTS_VALUE || p.pts > m_maxPts)
+        m_maxPts = p.pts;
     // A backwards dts jump of more than a second starts a new timestamp segment.
     if (p.dts != AV_NOPTS_VALUE) {
         const int64_t second = av_rescale_q(1, AVRational{1, 1}, m_timeBase);
@@ -210,7 +212,8 @@ std::shared_ptr<FrameIndex> FrameIndexBuilder::build(bool complete) const
 {
     auto idx = std::make_shared<FrameIndex>();
     idx->m_packets = m_packets;
-    idx->m_timeBase = m_timeBase;
+    const bool poc = m_ordering == FrameIndex::Ordering::Poc;
+    idx->m_timeBase = poc ? av_inv_q(m_pocRate) : m_timeBase;
     idx->m_complete = complete;
     idx->m_ordering = m_ordering;
     auto& pk = idx->m_packets;
@@ -240,7 +243,7 @@ std::shared_ptr<FrameIndex> FrameIndexBuilder::build(bool complete) const
             shown.push_back(i);
 
     size_t stable = shown.size();
-    if (m_ordering == FrameIndex::Ordering::Pts) {
+    if (m_ordering == FrameIndex::Ordering::Pts || poc) {
         std::stable_sort(shown.begin(), shown.end(), [&](int32_t a, int32_t b) {
             const IndexPacket& pa = pk[size_t(a)];
             const IndexPacket& pb = pk[size_t(b)];
@@ -255,7 +258,9 @@ std::shared_ptr<FrameIndex> FrameIndexBuilder::build(bool complete) const
             stable = 0;
             for (int32_t d : shown) {
                 const IndexPacket& p = pk[size_t(d)];
-                if (p.segment < lastSeg || (m_maxDts != AV_NOPTS_VALUE && p.pts <= m_maxDts))
+                const bool final = poc ? m_maxPts != AV_NOPTS_VALUE && p.pts <= m_maxPts - m_pocMargin
+                                       : p.segment < lastSeg || (m_maxDts != AV_NOPTS_VALUE && p.pts <= m_maxDts);
+                if (final)
                     ++stable;
                 else
                     break;
@@ -269,7 +274,7 @@ std::shared_ptr<FrameIndex> FrameIndexBuilder::build(bool complete) const
     for (size_t r = 0; r < stable; ++r) {
         IndexPacket& p = pk[size_t(shown[r])];
         p.pres = int32_t(r);
-        idx->m_presPts[r] = p.pts;
+        idx->m_presPts[r] = poc ? int64_t(r) : p.pts;  // POC: one tick of 1/rate per frame
     }
     if (stable)
         idx->m_firstPts = pk[size_t(shown[0])].pts;
@@ -297,7 +302,9 @@ std::shared_ptr<FrameIndex> FrameIndexBuilder::build(bool complete) const
 
     // Frame rate from the median spacing of consecutive displayed frames.
     double fps = m_nominalFrameRate;
-    if (m_ordering == FrameIndex::Ordering::Pts && stable >= 2) {
+    if (poc)
+        fps = av_q2d(m_pocRate);
+    else if (m_ordering == FrameIndex::Ordering::Pts && stable >= 2) {
         std::vector<int64_t> deltas;
         deltas.reserve(stable - 1);
         for (size_t r = 1; r < stable; ++r) {

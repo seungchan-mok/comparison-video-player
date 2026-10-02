@@ -42,7 +42,7 @@ Opened open(const QString& name, HwConfig hw)
 void addRows()
 {
     QTest::addColumn<QString>("name");
-    for (const auto& fx : test::fixtures({QStringLiteral("container")}))
+    for (const auto& fx : test::fixtures({QStringLiteral("container"), QStringLiteral("rawes")}))
         if (fx.name != QLatin1String("h264_b_avi"))
             QTest::newRow(qPrintable(fx.name)) << fx.name;
 }

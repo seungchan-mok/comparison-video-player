@@ -13,6 +13,7 @@ namespace scvp {
 struct InputOptions {
     std::string formatName;                                     // force a demuxer, e.g. "rawvideo"
     std::vector<std::pair<std::string, std::string>> options;  // demuxer options
+    double frameRate = 0;  // > 0: overrides the stream's rate (raw streams often have none)
 };
 
 struct Demuxer {

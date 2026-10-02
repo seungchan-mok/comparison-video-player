@@ -32,6 +32,7 @@ public:
     bool active() const { return m_ctx && !m_done; }
     bool done() const { return m_done; }
     int64_t firstPts() const { return m_firstPts; }
+    AVRational frameRate() const { return m_rate; }  // from the bitstream (VUI), 0/1 if none
 
     void feed(const AVPacket* pkt)
     {
@@ -64,6 +65,7 @@ private:
     {
         while (!m_done && avcodec_receive_frame(m_ctx.get(), m_frame.get()) == 0) {
             const int64_t pts = m_frame->pts != AV_NOPTS_VALUE ? m_frame->pts : m_frame->best_effort_timestamp;
+            m_rate = m_ctx->framerate;
             finish(pts);
         }
     }
@@ -79,8 +81,86 @@ private:
     ff::CodecContextPtr m_ctx;
     ff::FramePtr m_frame;
     int64_t m_firstPts = AV_NOPTS_VALUE;
+    AVRational m_rate{0, 1};
     int m_fed = 0;
     bool m_done = false;
+};
+
+// Raw H.264 / HEVC elementary streams have no timestamps: frame order comes from the picture
+// order count, which FFmpeg's parser computes per access unit. POC restarts at IDRs (a key whose
+// POC is not above everything before it); those epochs are chained into one increasing count
+// that stands in for pts, so the ordinary pts machinery (sorting, open-GOP leading pictures,
+// the first-output probe) applies. Container dts (AVI) are kept for seeking.
+class PocTimestamps {
+public:
+    PocTimestamps(const AVStream* st)
+    {
+        const AVCodecID id = st->codecpar->codec_id;
+        if (id != AV_CODEC_ID_H264 && id != AV_CODEC_ID_HEVC)
+            return;
+        m_parser.reset(av_parser_init(id));
+        m_ctx.reset(avcodec_alloc_context3(nullptr));
+        if (!m_parser || !m_ctx || avcodec_parameters_to_context(m_ctx.get(), st->codecpar) < 0) {
+            m_parser.reset();
+            return;
+        }
+        m_parser->flags |= PARSER_FLAG_COMPLETE_FRAMES;
+    }
+
+    // Decided on the first packet: only streams without any timestamps.
+    bool decide(const AVPacket& pkt)
+    {
+        if (!m_decided) {
+            m_decided = true;
+            m_active = m_parser && pkt.pts == AV_NOPTS_VALUE;  // raw ES; AVI has dts only
+            if (!m_active)
+                m_parser.reset();
+        }
+        return m_active;
+    }
+    bool active() const { return m_active; }
+
+    void assign(AVPacket& pkt)
+    {
+        uint8_t* out = nullptr;
+        int outSize = 0;
+        av_parser_parse2(m_parser.get(), m_ctx.get(), &out, &outSize, pkt.data, pkt.size, AV_NOPTS_VALUE, AV_NOPTS_VALUE, pkt.pos);
+        const int64_t poc = m_parser->output_picture_number;
+        const bool key = (pkt.flags & AV_PKT_FLAG_KEY) || m_parser->key_frame == 1;
+        if (m_any && key && poc <= m_epochMax) {
+            // The new epoch starts after the old one, with room for leading pictures that follow
+            // the key in decode order but precede it (lower POC). Gaps do not matter: Poc
+            // ordering times frames arithmetically.
+            m_base = m_maxPts + 64 * m_step - poc;
+            m_epochMax = INT64_MIN;
+        }
+        // Smallest POC step seen (2 for frame-coded H.264, 1 for HEVC): the gap between epochs.
+        if (m_any && poc != m_lastPoc)
+            m_step = std::min<int64_t>(m_step, std::llabs(poc - m_lastPoc));
+        m_lastPoc = poc;
+        m_any = true;
+        m_epochMax = std::max(m_epochMax, poc);
+        pkt.pts = m_base + poc;
+        m_maxPts = std::max(m_maxPts, pkt.pts);
+    }
+    // A frame whose count is this far below the largest seen cannot be preceded by a later
+    // packet any more: H.264/HEVC reorder at most 16 frames.
+    int64_t reorderMargin() const { return 32 * std::min<int64_t>(m_step, 2); }
+
+private:
+    struct ParserDel {
+        void operator()(AVCodecParserContext* p) const { av_parser_close(p); }
+    };
+    std::unique_ptr<AVCodecParserContext, ParserDel> m_parser;
+    ff::CodecContextPtr m_ctx;
+    bool m_decided = false;
+    bool m_active = false;
+    bool m_any = false;
+    int64_t m_base = 0;
+    int64_t m_maxPts = INT64_MIN;
+    int64_t m_epochMax = INT64_MIN;
+    int64_t m_lastPoc = 0;
+    int64_t m_step = 1 << 20;
 };
 
 } // namespace
@@ -143,6 +223,7 @@ FrameIndexPtr IndexScanner::scan(const std::string& path, const InputOptions& op
     FrameIndexBuilder builder(st->time_base, guessed.num > 0 && guessed.den > 0 ? av_q2d(guessed) : 0.0);
 
     FirstOutputProbe probe(st);
+    PocTimestamps poc(st);
     const int64_t fileSize = fmt->pb ? avio_size(fmt->pb) : -1;
     auto pkt = ff::makePacket();
     auto lastPublish = Clock::now();
@@ -150,7 +231,16 @@ FrameIndexPtr IndexScanner::scan(const std::string& path, const InputOptions& op
     bool earlyPublished = false;
 
     auto publish = [&](bool complete) {
-        builder.setOrdering(builder.missingPts() ? FrameIndex::Ordering::Decode : FrameIndex::Ordering::Pts);
+        if (poc.active()) {
+            AVRational rate = probe.frameRate();
+            if (opts.frameRate > 0)
+                rate = av_d2q(opts.frameRate, 1001000);
+            else if (rate.num <= 0 || rate.den <= 0)
+                rate = AVRational{30, 1};  // no timing in the bitstream
+            builder.setPocTiming(rate, poc.reorderMargin());
+        } else {
+            builder.setOrdering(builder.missingPts() ? FrameIndex::Ordering::Decode : FrameIndex::Ordering::Pts);
+        }
         auto snapshot = builder.build(complete);
         publishedAt = builder.size();
         lastPublish = Clock::now();
@@ -169,6 +259,8 @@ FrameIndexPtr IndexScanner::scan(const std::string& path, const InputOptions& op
             break;
         }
         if (pkt->stream_index == demux->stream) {
+            if (poc.decide(*pkt))
+                poc.assign(*pkt);
             builder.add(*pkt);
             if (probe.active()) {
                 probe.feed(pkt.get());

@@ -110,6 +110,15 @@ public:
     // frames before it (leading pictures of an open first GOP) are hidden.
     void setFirstOutputPts(int64_t pts) { m_firstOutputPts = pts; }
     void setOrdering(FrameIndex::Ordering o) { m_ordering = o; }
+    // Poc ordering: pts carry picture order counts (made monotonic across IDRs) instead of
+    // times; frames are then timed arithmetically at `frameRate`.
+    // A frame is final once its count is reorderMargin below the largest one added.
+    void setPocTiming(AVRational frameRate, int64_t reorderMargin)
+    {
+        m_ordering = FrameIndex::Ordering::Poc;
+        m_pocRate = frameRate;
+        m_pocMargin = reorderMargin;
+    }
 
     size_t size() const { return m_packets.size(); }
     bool missingPts() const { return m_missingPts > 0; }
@@ -125,6 +134,9 @@ private:
     int16_t m_segment = 0;
     size_t m_missingPts = 0;
     FrameIndex::Ordering m_ordering = FrameIndex::Ordering::Pts;
+    AVRational m_pocRate{30, 1};
+    int64_t m_pocMargin = 64;
+    int64_t m_maxPts = AV_NOPTS_VALUE;
 };
 
 } // namespace scvp

@@ -35,15 +35,11 @@ Opened openFixture(const QString& name)
     return o;
 }
 
-// Fixtures whose frame numbering needs POC ordering arrive with the raw-stream milestone.
-bool supportedNow(const test::Fixture& fx) { return fx.name != QLatin1String("h264_b_avi"); }
-
 void addFixtureRows()
 {
     QTest::addColumn<QString>("name");
-    for (const auto& fx : test::fixtures({QStringLiteral("container")}))
-        if (supportedNow(fx))
-            QTest::newRow(qPrintable(fx.name)) << fx.name;
+    for (const auto& fx : test::fixtures({QStringLiteral("container"), QStringLiteral("rawes")}))
+        QTest::newRow(qPrintable(fx.name)) << fx.name;
 }
 
 // Seeks to the key for `target` and decodes until it; every frame on the way must be correct.

@@ -206,9 +206,7 @@ private slots:
     void scanFixtures_data()
     {
         QTest::addColumn<QString>("name");
-        for (const auto& fx : test::fixtures({QStringLiteral("container")})) {
-            if (fx.name == QLatin1String("h264_b_avi"))  // no pts: needs POC ordering (later milestone)
-                continue;
+        for (const auto& fx : test::fixtures({QStringLiteral("container"), QStringLiteral("rawes")})) {
             QTest::newRow(qPrintable(fx.name)) << fx.name;
         }
     }
@@ -234,6 +232,49 @@ private slots:
             QVERIFY(sp.valid());
             QVERIFY(idx->packet(sp.dec).isKey());
             QVERIFY(sp.dec <= idx->decodeFromPres(pres));
+        }
+        // No timestamps: ordered by picture order count, timed by the bitstream's rate.
+        const bool noPts = fx->kind == QLatin1String("rawes") || name == QLatin1String("h264_b_avi");
+        QCOMPARE(idx->ordering() == FrameIndex::Ordering::Poc, noPts);
+        if (noPts) {
+            QCOMPARE(idx->frameRate(), 30.0);
+            QCOMPARE(idx->secondsOf(30), 1.0);
+        }
+    }
+
+    void pocSnapshotsAreStable()
+    {
+        // I P B B P B B ... with POC = 2 x display index; an IDR every 12 frames resets it.
+        FrameIndexBuilder b(AVRational{1, 1200000}, 0);
+        std::vector<IndexPacket> all;
+        int64_t base = 0;
+        for (int g = 0; g < 4; ++g) {
+            for (const IndexPacket& p : ibbpStream(1, 12)) {
+                IndexPacket q = p;
+                q.pts = base + 2 * p.pts;  // what the scanner synthesises from POC
+                q.dts = AV_NOPTS_VALUE;
+                all.push_back(q);
+            }
+            base += 12 * 2 + 64 * 2;
+        }
+        for (size_t i = 0; i < all.size(); ++i) {
+            b.add(all[i]);
+            b.setPocTiming(AVRational{25, 1}, 64);
+            auto partial = b.build(false);
+            // Final frames are a prefix of display order and never change later.
+            for (int32_t r = 0; r < partial->frameCount(); ++r)
+                QCOMPARE(partial->packet(partial->decodeFromPres(r)).pts, all[size_t(partial->decodeFromPres(r))].pts);
+            if (i + 1 == all.size()) {
+                auto full = b.build(true);
+                QCOMPARE(full->frameCount(), 48);
+                for (int32_t r = 1; r < 48; ++r)
+                    QVERIFY(full->packet(full->decodeFromPres(r)).pts > full->packet(full->decodeFromPres(r - 1)).pts);
+                for (int32_t r = 0; r < partial->frameCount(); ++r)
+                    QCOMPARE(partial->decodeFromPres(r), full->decodeFromPres(r));
+                QCOMPARE(full->frameRate(), 25.0);
+                QCOMPARE(full->secondsOf(25), 1.0);
+                QVERIFY(partial->frameCount() < 48 && partial->frameCount() > 0);
+            }
         }
     }
 
