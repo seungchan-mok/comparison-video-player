@@ -1,9 +1,11 @@
+add_subdirectory(engine)
+
 qt_add_executable(scvp WIN32 MACOSX_BUNDLE
     main.cpp
 )
 target_link_libraries(scvp PRIVATE
     scvp::compile_options
-    scvp::ffmpeg
+    scvp::engine
     Qt6::Widgets
 )
 set_target_properties(scvp PROPERTIES
