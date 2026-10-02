@@ -1,5 +1,6 @@
 #include "engine/FFmpegSource.h"
 #include "render/CodeReader.h"
+#include "render/CompareLayout.h"
 #include "render/ColorParams.h"
 #include "render/ViewTransform.h"
 #include "support/TestSupport.h"
@@ -14,7 +15,7 @@ using namespace scvp;
 namespace {
 
 // Runs scvp on the virtual display and returns the grabbed view.
-QImage grab(const QString& file, const QStringList& extra, QString* log)
+QImage grab(const QStringList& files, const QStringList& extra, QString* log)
 {
     QTemporaryDir dir;
     const QString png = dir.filePath(QStringLiteral("grab.png"));
@@ -24,8 +25,9 @@ QImage grab(const QString& file, const QStringList& extra, QString* log)
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     env.insert(QStringLiteral("XDG_CONFIG_HOME"), dir.filePath(QStringLiteral("config")));
     p.setProcessEnvironment(env);
-    QStringList args{QStringLiteral(SCVP_APP_PATH), file, QStringLiteral("--debug-size"), QStringLiteral("700x600"),
-                     QStringLiteral("--debug-grab"), png};
+    QStringList args{QStringLiteral(SCVP_APP_PATH)};
+    args += files;
+    args += {QStringLiteral("--debug-size"), QStringLiteral("700x600"), QStringLiteral("--debug-grab"), png};
     args += extra;
     p.start(QStringLiteral(SCVP_XVFB_RUN), args);
     p.waitForFinished(60000);
@@ -63,7 +65,7 @@ private slots:
         SCVP_REQUIRE_FIXTURES();
         const auto fx = test::fixture(QStringLiteral("h264_b"));
         QString log;
-        const QImage img = grab(fx->path, {QStringLiteral("--debug-seek"), QStringLiteral("100"), QStringLiteral("--debug-after"),
+        const QImage img = grab({fx->path}, {QStringLiteral("--debug-seek"), QStringLiteral("100"), QStringLiteral("--debug-after"),
                                            QStringLiteral("1500")},
                                 &log);
         if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
@@ -105,7 +107,7 @@ private slots:
         SCVP_REQUIRE_FIXTURES();
         const auto fx = test::fixture(QStringLiteral("hevc_opengop"));
         QString log;
-        const QImage img = grab(fx->path, {QStringLiteral("--debug-play"), QStringLiteral("--debug-after"), QStringLiteral("2000")}, &log);
+        const QImage img = grab({fx->path}, {QStringLiteral("--debug-play"), QStringLiteral("--debug-after"), QStringLiteral("2000")}, &log);
         if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
             QSKIP("Xvfb not available");
         QVERIFY2(!img.isNull(), qPrintable(log));
@@ -114,6 +116,83 @@ private slots:
         QVERIFY2(m.hasMatch(), qPrintable(log));
         const int frame = m.captured(1).toInt();
         QVERIFY2(frame > 20 && frame < 170, qPrintable(QString::number(frame)));
+    }
+
+    // A and a copy without its first 3 frames: at offset -3 every pair is the same picture, so
+    // the difference view is black and the split panes are identical; any other offset is not.
+    void syncedDifferenceIsZero_data()
+    {
+        QTest::addColumn<int>("offset");
+        QTest::addColumn<int>("seek");
+        QTest::addColumn<bool>("zero");
+        QTest::newRow("offset -3, frame 3") << -3 << 3 << true;
+        QTest::newRow("offset -3, frame 60") << -3 << 60 << true;
+        QTest::newRow("offset -3, last frame") << -3 << 119 << true;
+        QTest::newRow("offset -2") << -2 << 60 << false;
+        QTest::newRow("offset -3, B held at frame 0") << -3 << 1 << false;
+    }
+
+    void syncedDifferenceIsZero()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        QFETCH(int, offset);
+        QFETCH(int, seek);
+        QFETCH(bool, zero);
+        const auto a = test::fixture(QStringLiteral("ffv1_10bit"));
+        const auto b = test::fixture(QStringLiteral("ffv1_10bit_trim3"));
+        QVERIFY(a && b);
+        QString log;
+        const QImage img = grab({a->path, b->path},
+                                {QStringLiteral("--offset"), QString::number(offset), QStringLiteral("--view"), QStringLiteral("diff"),
+                                 QStringLiteral("--debug-seek"), QString::number(seek), QStringLiteral("--debug-after"), QStringLiteral("2000")},
+                                &log);
+        if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
+            QSKIP("Xvfb not available");
+        QVERIFY2(!img.isNull(), qPrintable(log));
+        QVERIFY2(log.contains(QStringLiteral("(frame %1)").arg(seek)), qPrintable(log));
+        render::ViewTransform vt;
+        vt.setViewportSize(QSizeF(img.size()));
+        vt.setImageSize(QSizeF(320, 240));
+        const QPoint t = vt.renderTranslation().toPoint();
+        const int w = int(320 * vt.scale()), h = int(240 * vt.scale());
+        int nonzero = 0;
+        for (int y = t.y(); y < t.y() + h; ++y)
+            for (int x = t.x(); x < t.x() + w; ++x) {
+                const QColor c = img.pixelColor(x, y);
+                nonzero += (c.red() | c.green() | c.blue()) ? 1 : 0;
+            }
+        if (zero)
+            QCOMPARE(nonzero, 0);
+        else
+            QVERIFY2(nonzero > w * h / 4, qPrintable(QString::number(nonzero)));
+    }
+
+    void splitPanesMatchWhenSynced()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        const auto a = test::fixture(QStringLiteral("ffv1_10bit"));
+        const auto b = test::fixture(QStringLiteral("ffv1_10bit_trim3"));
+        QString log;
+        const QImage img = grab({a->path, b->path},
+                                {QStringLiteral("--offset"), QStringLiteral("-3"), QStringLiteral("--view"), QStringLiteral("sbs"),
+                                 QStringLiteral("--debug-seek"), QStringLiteral("40"), QStringLiteral("--debug-after"), QStringLiteral("2000")},
+                                &log);
+        if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
+            QSKIP("Xvfb not available");
+        QVERIFY2(!img.isNull(), qPrintable(log));
+        const int paneW = (img.width() - render::CompareLayout::kDivider) / 2;
+        const int bx = img.width() - paneW;
+        int diff = 0;
+        for (int y = 0; y < img.height(); ++y)
+            for (int x = 0; x < paneW; ++x)
+                diff += img.pixel(x, y) != img.pixel(bx + x, y) ? 1 : 0;
+        QCOMPARE(diff, 0);
+        // And the panes show the video, not just background.
+        render::ViewTransform vt;
+        vt.setViewportSize(QSizeF(paneW, img.height()));
+        vt.setImageSize(QSizeF(320, 240));
+        const QPointF c = vt.imageToDevice(QPointF(160, 120));
+        QVERIFY(img.pixelColor(int(c.x()), int(c.y())) != QColor(30, 30, 32));
     }
 };
 

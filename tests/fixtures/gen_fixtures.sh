@@ -9,7 +9,7 @@
 # 10-bit clip with a 250-frame GOP for scvp-bench.
 #
 # manifest.tsv columns: name  kind  path  open-args  frames
-#   kind: container | rawes | rawvideo | imageseq
+#   kind: container | rawes | rawvideo | imageseq | compare (second input of comparison tests)
 #   open-args: rawvideo -> pix_fmt:WxH:fps   imageseq -> fps   others -> "-"
 set -euo pipefail
 
@@ -87,6 +87,9 @@ ref h264_b_avi container h264_b.avi - -i h264_b.avi
 
 ff "${SRC_LAVFI[@]}" -t 4 -c:v ffv1 -pix_fmt yuv420p10le ffv1_10bit.mkv
 ref ffv1_10bit container ffv1_10bit.mkv - -i ffv1_10bit.mkv
+# The same pictures without the first 3 frames (lossless): pairs with ffv1_10bit at offset -3.
+ff -i ffv1_10bit.mkv -vf "trim=start_frame=3,setpts=PTS-STARTPTS" -c:v ffv1 -pix_fmt yuv420p10le ffv1_10bit_trim3.mkv
+ref ffv1_10bit_trim3 compare ffv1_10bit_trim3.mkv - -i ffv1_10bit_trim3.mkv
 
 # Variable frame rate: pauses after frame 30 and 60.
 VFR="setpts='if(lt(N,30),N,if(lt(N,60),N+15,N+30))/30/TB'"
