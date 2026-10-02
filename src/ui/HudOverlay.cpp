@@ -5,6 +5,7 @@
 
 #include "engine/GpuFrame.h"
 
+#include <QDir>
 #include <QEvent>
 #include <QFileInfo>
 #include <QFontDatabase>
@@ -146,8 +147,9 @@ QStringList HudOverlay::lines() const
         const DisplayFrame& shown = m_player->shown(slot);
         const int64_t pos = shown.number;
         const FramePtr f = shown.frame;
-        const QString name = QFileInfo(QString::fromStdString(info.path)).fileName();
-        out << QStringLiteral("%1  %2").arg(slot == 0 ? QStringLiteral("A") : QStringLiteral("B"), name);
+        // Full path: two files of the same name (a/out.mp4, b/out.mp4) are told apart.
+        const QString path = QDir::toNativeSeparators(QFileInfo(QString::fromStdString(info.path)).absoluteFilePath());
+        out << QStringLiteral("%1  %2").arg(slot == 0 ? QStringLiteral("A") : QStringLiteral("B"), path);
         QString fmt = QString::fromLatin1(av_get_pix_fmt_name(f ? f->format() : info.pixelFormat));
         out << QStringLiteral("   %1 %2x%3 %4  %5 fps").arg(QString::fromStdString(info.codecName)).arg(info.width).arg(info.height).arg(fmt)
                    .arg(idx ? idx->frameRate() : info.nominalFrameRate, 0, 'f', 3);
@@ -231,6 +233,37 @@ void HudOverlay::paintPaneLabels(QPainter& p, const QFontMetrics& fm)
     }
 }
 
+// Breaks a line that does not fit after a path separator (else a space, else where the width
+// runs out); continuations are indented.
+QStringList HudOverlay::wrapLine(const QString& line, const QFontMetrics& fm, int maxWidth)
+{
+    QStringList out;
+    QString rest = line;
+    const QString indent = QStringLiteral("      ");
+    while (fm.horizontalAdvance(rest) > maxWidth) {
+        int sep = -1, space = -1;
+        for (int i = 1; i < rest.size(); ++i) {
+            if (fm.horizontalAdvance(rest.left(i)) > maxWidth)
+                break;
+            const QChar c = rest.at(i - 1);
+            if (c == QLatin1Char('/') || c == QLatin1Char('\\'))
+                sep = i;
+            else if (c == QLatin1Char(' '))
+                space = i;
+        }
+        int cut = sep > indent.size() ? sep : space;
+        if (cut <= indent.size()) {  // no separator: cut where the width runs out
+            cut = 1;
+            while (cut < rest.size() && fm.horizontalAdvance(rest.left(cut + 1)) <= maxWidth)
+                ++cut;
+        }
+        out << rest.left(cut);
+        rest = indent + rest.mid(cut);
+    }
+    out << rest;
+    return out;
+}
+
 void HudOverlay::paintEvent(QPaintEvent*)
 {
     QPainter p(this);
@@ -246,7 +279,9 @@ void HudOverlay::paintEvent(QPaintEvent*)
         p.drawText(box.adjusted(8, 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft, m_pixelText);
     }
     if (m_info) {
-        const QStringList ls = lines();
+        QStringList ls;
+        for (const QString& l : lines())
+            ls << wrapLine(l, fm, std::max(200, width() - 32));
         int w = 0;
         for (const QString& l : ls)
             w = std::max(w, fm.horizontalAdvance(l));

@@ -36,6 +36,7 @@ private:
     QStringList lines() const;
     QString pathText(int slot) const;
     void paintPaneLabels(QPainter& p, const QFontMetrics& fm);
+    static QStringList wrapLine(const QString& line, const QFontMetrics& fm, int maxWidth);
     void sampleRates();  // refresh timer: frame rates over the last second
     QString perfLine() const;
 
