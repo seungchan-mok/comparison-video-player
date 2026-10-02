@@ -12,6 +12,9 @@ namespace {
 class FakeBackend : public PlaybackBackend {
 public:
     int32_t frames = 100;
+    bool final = true;
+    int32_t partial = 0;
+    int32_t estimate = 0;
     double fps = 30;
     bool open[2] = {true, false};
     std::set<int32_t> available;
@@ -19,7 +22,9 @@ public:
     mutable std::map<int32_t, FramePtr> made;
 
     bool isOpen(int slot) const override { return open[slot]; }
-    int32_t frameCount(int) const override { return frames; }
+    int32_t frameCount(int) const override { return final ? frames : partial; }
+    bool frameCountFinal(int) const override { return final; }
+    int32_t frameCountEstimate(int) const override { return estimate; }
     double frameRate(int) const override { return fps; }
     FramePtr frame(int, int32_t n) const override
     {
@@ -212,6 +217,23 @@ private slots:
         c.jump(-1, false);
         QCOMPARE(c.position(), int64_t(89));
         QCOMPARE(b.intents.back().jumpDistances, (std::vector<int32_t>{10, 100}));
+    }
+
+    void seeksBeforeTheIndexIsCompleteAreKept()
+    {
+        FakeBackend b;
+        b.all();
+        b.final = false;
+        b.partial = 20;
+        b.estimate = 120;  // from duration x fps
+        PlaybackController c(b);
+        c.mediaChanged();
+        c.seek(100);
+        QCOMPARE(c.position(), int64_t(100));
+        QCOMPARE(c.length(), int64_t(120));
+        b.final = true;  // the scan finished: 100 frames
+        c.mediaChanged();
+        QCOMPARE(c.position(), int64_t(99));
     }
 
     void pauseStaysOnScreenFrame()

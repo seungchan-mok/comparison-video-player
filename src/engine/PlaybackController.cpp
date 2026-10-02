@@ -11,6 +11,18 @@ int32_t EngineBackend::frameCount(int slot) const
     return idx ? idx->frameCount() : 0;
 }
 
+bool EngineBackend::frameCountFinal(int slot) const
+{
+    FrameIndexPtr idx = m_engine.index(slot);
+    return idx && idx->complete();
+}
+
+int32_t EngineBackend::frameCountEstimate(int slot) const
+{
+    const VideoInfo info = m_engine.info(slot);
+    return int32_t(std::llround(info.durationSeconds * (info.nominalFrameRate > 0 ? info.nominalFrameRate : 25.0)));
+}
+
 double EngineBackend::frameRate(int slot) const
 {
     FrameIndexPtr idx = m_engine.index(slot);
@@ -27,7 +39,16 @@ int PlaybackController::masterSlot() const { return m_backend.isOpen(0) || !m_ba
 int64_t PlaybackController::length() const
 {
     const int s = masterSlot();
-    return m_backend.isOpen(s) ? m_backend.frameCount(s) : 0;
+    if (!m_backend.isOpen(s))
+        return 0;
+    const int64_t n = m_backend.frameCount(s);
+    return m_backend.frameCountFinal(s) ? n : std::max<int64_t>(n, m_backend.frameCountEstimate(s));
+}
+
+bool PlaybackController::lengthFinal() const
+{
+    const int s = masterSlot();
+    return m_backend.isOpen(s) && m_backend.frameCountFinal(s);
 }
 
 double PlaybackController::frameRate() const

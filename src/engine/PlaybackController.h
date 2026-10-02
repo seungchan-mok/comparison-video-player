@@ -12,7 +12,11 @@ class PlaybackBackend {
 public:
     virtual ~PlaybackBackend() = default;
     virtual bool isOpen(int slot) const = 0;
-    virtual int32_t frameCount(int slot) const = 0;
+    virtual int32_t frameCount(int slot) const = 0;  // frames indexed so far
+    // Whether frameCount() is final; while a file is still being indexed, positions may go up
+    // to frameCountEstimate() (duration x frame rate) so early seeks are not clamped.
+    virtual bool frameCountFinal(int slot) const = 0;
+    virtual int32_t frameCountEstimate(int slot) const = 0;
     virtual double frameRate(int slot) const = 0;
     virtual FramePtr frame(int slot, int32_t n) const = 0;
     virtual void request(int slot, const PlaybackIntent& intent) = 0;
@@ -26,6 +30,8 @@ public:
     }
     bool isOpen(int slot) const override { return m_engine.isOpen(slot); }
     int32_t frameCount(int slot) const override;
+    bool frameCountFinal(int slot) const override;
+    int32_t frameCountEstimate(int slot) const override;
     double frameRate(int slot) const override;
     FramePtr frame(int slot, int32_t n) const override { return m_engine.frame(slot, n); }
     void request(int slot, const PlaybackIntent& intent) override { m_engine.request(slot, intent); }
@@ -96,7 +102,8 @@ public:
     TickResult tick(double nowSeconds);
 
     int64_t position() const { return m_position; }
-    int64_t length() const;
+    int64_t length() const;        // frames, final or estimated
+    bool lengthFinal() const;
     double frameRate() const;
     int masterSlot() const;
     // True when the frame at position() is on screen: key repeat waits for this.
