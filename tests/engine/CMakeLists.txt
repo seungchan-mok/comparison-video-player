@@ -6,7 +6,7 @@ scvp_add_test(tst_decodesession tst_decodesession.cpp
 scvp_add_test(tst_framecache tst_framecache.cpp)
 scvp_add_test(tst_prefetchplanner tst_prefetchplanner.cpp)
 scvp_add_test(tst_engine tst_engine.cpp
-    FUNCTIONS showsRequestedFrame sequentialPlayback backwardStepping randomJumps
+    FUNCTIONS showsRequestedFrame sequentialPlayback playingToTheEndDecodesEachFrameOnce backwardStepping randomJumps
               shrinkingBudgetReleasesMemory twoVideosShareTheBudget gpuTier jumpTargetStaysOnGpu closeWhileDecoding)
 scvp_add_test(tst_rawvideo tst_rawvideo.cpp)
 scvp_add_test(tst_imagesequence tst_imagesequence.cpp)

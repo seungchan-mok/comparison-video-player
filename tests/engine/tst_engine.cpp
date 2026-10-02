@@ -102,6 +102,35 @@ private slots:
         QVERIFY(o.engine.stats(0).seeks <= 2);
     }
 
+    // Two videos played to the end with a cache smaller than the file: every frame decodes about
+    // once. (A capacity planned from an estimated frame size used to exceed what the cache held;
+    // near the end the full-size plan never fit and evicted frames were re-decoded GOP by GOP.)
+    void playingToTheEndDecodesEachFrameOnce()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        OpenedEngine o;
+        QVERIFY(openFixture(o, 0, QStringLiteral("h264_b")));
+        QVERIFY(openFixture(o, 1, QStringLiteral("h264_b")));
+        const size_t fb = frameBytesFor(o.engine, 0);
+        QVERIFY(fb > 0);
+        o.engine.setMemoryBudget(fb * 220);  // ~90 frames per video plus decoder reserve
+        QVERIFY(o.engine.capacityFrames(0) < o.frames);
+        PlaybackIntent in;
+        in.playing = true;
+        for (int32_t p = 0; p < o.frames; ++p) {
+            in.playhead = p;
+            o.engine.request(0, in);
+            o.engine.request(1, in);
+            QVERIFY2(waitFrame(o.engine, 0, p) && waitFrame(o.engine, 1, p), qPrintable(QString::number(p)));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));  // a refill loop would keep going
+        for (int slot = 0; slot < 2; ++slot) {
+            const SlotStats st = o.engine.stats(slot);
+            QVERIFY2(st.framesDecoded <= uint64_t(o.frames) * 11 / 10,
+                     qPrintable(QStringLiteral("slot %1: %2 decoded, %3 seeks").arg(slot).arg(st.framesDecoded).arg(st.seeks)));
+        }
+    }
+
     void backwardStepping_data()
     {
         QTest::addColumn<int>("capacityGops");  // capacity in GOPs x 4 (8 = two GOPs, 2 = half a GOP)
