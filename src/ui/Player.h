@@ -49,7 +49,7 @@ public:
     bool playing() const override { return m_controller.playing(); }
     bool slotOpen(int slot) const override { return m_engine.isOpen(slot); }
     RangeSetPtr cachedRanges(int slot) const override { return m_engine.cachedRanges(slot); }
-    int64_t slotOffset(int) const override { return 0; }
+    int64_t slotOffset(int slot) const override { return m_controller.mapper().shift(slot); }
     bool hasLoop() const override { return m_controller.hasLoop(); }
     bool loopActive() const override { return m_controller.loopActive(); }
     int64_t loopFirst() const override { return m_controller.loopFirst(); }

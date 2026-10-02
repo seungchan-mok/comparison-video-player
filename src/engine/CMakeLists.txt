@@ -19,6 +19,7 @@ add_library(scvp_engine STATIC
     Platform.h Platform.cpp
     PlaybackController.h PlaybackController.cpp
     PrefetchPlanner.h PrefetchPlanner.cpp
+    TimelineMapper.h TimelineMapper.cpp
     VideoSource.h
 )
 add_library(scvp::engine ALIAS scvp_engine)

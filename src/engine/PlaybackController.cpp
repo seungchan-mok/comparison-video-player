@@ -36,26 +36,68 @@ PlaybackController::PlaybackController(PlaybackBackend& backend)
 
 int PlaybackController::masterSlot() const { return m_backend.isOpen(0) || !m_backend.isOpen(1) ? 0 : 1; }
 
-int64_t PlaybackController::length() const
+TimelineMapper PlaybackController::mapper() const
 {
-    const int s = masterSlot();
-    if (!m_backend.isOpen(s))
-        return 0;
-    const int64_t n = m_backend.frameCount(s);
-    return m_backend.frameCountFinal(s) ? n : std::max<int64_t>(n, m_backend.frameCountEstimate(s));
+    TimelineMapper m;
+    for (int s = 0; s < 2; ++s) {
+        SlotTiming t;
+        t.open = m_backend.isOpen(s);
+        if (t.open) {
+            const int64_t n = m_backend.frameCount(s);
+            t.frames = m_backend.frameCountFinal(s) ? n : std::max<int64_t>(n, m_backend.frameCountEstimate(s));
+            t.fps = m_backend.frameRate(s) > 0 ? m_backend.frameRate(s) : 25.0;
+            if (m_syncMode == SyncMode::Timestamp)
+                t.index = m_backend.index(s);
+        }
+        m.setSlot(s, t);
+    }
+    m.setOffset(m_offset);
+    m.setMode(m_syncMode);
+    return m;
 }
+
+int64_t PlaybackController::length() const { return mapper().length(); }
 
 bool PlaybackController::lengthFinal() const
 {
-    const int s = masterSlot();
-    return m_backend.isOpen(s) && m_backend.frameCountFinal(s);
+    for (int s = 0; s < 2; ++s)
+        if (m_backend.isOpen(s) && !m_backend.frameCountFinal(s))
+            return false;
+    return m_backend.isOpen(0) || m_backend.isOpen(1);
 }
 
-double PlaybackController::frameRate() const
+double PlaybackController::frameRate() const { return mapper().fps(); }
+
+void PlaybackController::setOffset(int64_t offset)
 {
-    const int s = masterSlot();
-    const double fps = m_backend.isOpen(s) ? m_backend.frameRate(s) : 0.0;
-    return fps > 0 ? fps : 25.0;
+    if (offset == m_offset)
+        return;
+    const TimelineMapper before = mapper();
+    const int m = before.master();
+    const int64_t masterFrame = before.local(m, m_position).frame;
+    auto masterLoop = [&](int64_t p) { return p >= 0 ? before.local(m, p).frame : int64_t(-1); };
+    const int64_t lf = masterLoop(m_loopFirst), ll = masterLoop(m_loopLast);
+    m_offset = offset;
+    const TimelineMapper after = mapper();
+    m_position = clampPosition(after.positionOf(m, masterFrame));
+    if (hasLoop()) {
+        m_loopFirst = clampPosition(after.positionOf(m, lf));
+        m_loopLast = clampPosition(after.positionOf(m, ll));
+    }
+    m_anchorTime = -1;
+    m_stateDirty = true;
+    requestAll();
+}
+
+void PlaybackController::setSyncMode(SyncMode mode)
+{
+    if (mode == m_syncMode)
+        return;
+    m_syncMode = mode;
+    m_position = clampPosition(m_position);
+    m_anchorTime = -1;
+    m_stateDirty = true;
+    requestAll();
 }
 
 int64_t PlaybackController::clampPosition(int64_t p) const
@@ -67,7 +109,8 @@ int64_t PlaybackController::clampPosition(int64_t p) const
 void PlaybackController::mediaChanged()
 {
     m_position = clampPosition(m_position);
-    m_shown.reset();
+    m_shown = {};
+    m_shownLocal = {};
     m_shownNumber = -1;
     m_anchorTime = -1;
     if (hasLoop()) {
@@ -80,20 +123,31 @@ void PlaybackController::mediaChanged()
 
 void PlaybackController::requestAll()
 {
-    const int s = masterSlot();
-    if (!m_backend.isOpen(s))
-        return;
-    PlaybackIntent in;
-    in.playhead = int32_t(m_position);
-    in.direction = m_playing ? 1 : m_direction;
-    in.playing = m_playing;
-    in.speed = m_speed;
-    if (hasLoop()) {
-        in.loop = {int32_t(m_loopFirst), int32_t(m_loopLast)};
-        in.loopActive = m_loopActive;
+    const TimelineMapper m = mapper();
+    for (int s = 0; s < 2; ++s) {
+        if (!m_backend.isOpen(s))
+            continue;
+        PlaybackIntent in;
+        in.playhead = m.local(s, m_position).frame;
+        in.direction = m_playing ? 1 : m_direction;
+        in.playing = m_playing;
+        in.speed = m_speed;
+        if (hasLoop()) {
+            in.loop = {m.local(s, m_loopFirst).frame, m.local(s, m_loopLast).frame};
+            in.loopActive = m_loopActive;
+        }
+        in.jumpDistances = {jumpFrames(false), jumpFrames(true)};
+        m_backend.request(s, in);
     }
-    in.jumpDistances = {jumpFrames(false), jumpFrames(true)};
-    m_backend.request(s, in);
+}
+
+// Every open video has its frame for `position` (lockstep).
+bool PlaybackController::ready(const TimelineMapper& m, int64_t position) const
+{
+    for (int s = 0; s < 2; ++s)
+        if (m_backend.isOpen(s) && !m_backend.frame(s, m.local(s, position).frame))
+            return false;
+    return true;
 }
 
 void PlaybackController::setPosition(int64_t p, int direction)
@@ -232,17 +286,18 @@ void PlaybackController::setJumpSettings(const JumpSettings& j)
 TickResult PlaybackController::tick(double now)
 {
     TickResult r;
-    const int s = masterSlot();
-    if (!m_backend.isOpen(s) || length() <= 0) {
-        r.changed = m_shown != nullptr;
-        m_shown.reset();
+    const TimelineMapper map = mapper();
+    const int64_t n = map.length();
+    if (n <= 0) {
+        r.changed = m_shown[0] || m_shown[1];
+        m_shown = {};
+        m_shownLocal = {};
         m_shownNumber = -1;
         return r;
     }
-    const int64_t n = length();
 
     if (m_playing) {
-        const double fps = frameRate() * m_speed;
+        const double fps = map.fps() * m_speed;
         if (m_anchorTime < 0) {
             m_anchorTime = now;
             m_anchorPos = m_position;
@@ -261,10 +316,10 @@ TickResult PlaybackController::tick(double now)
             due = n - 1;
         }
         if (due > m_position) {
-            // Advance through decoded frames only (never skip one that is missing); if the
-            // next one is not there yet, stall and restart the clock from where we stopped.
+            // Advance through positions whose frames are all decoded (never skip one that is
+            // missing); if the next one is not there yet, stall and restart the clock there.
             int64_t best = m_position;
-            while (best < due && m_backend.frame(s, int32_t(best + 1)))
+            while (best < due && ready(map, best + 1))
                 ++best;
             if (best == m_position) {
                 r.stalled = true;
@@ -283,20 +338,30 @@ TickResult PlaybackController::tick(double now)
                 requestAll();
             }
         }
-        if (!looping && m_position >= n - 1 && m_backend.frame(s, int32_t(n - 1))) {
+        if (!looping && m_position >= n - 1 && ready(map, n - 1)) {
             m_playing = false;  // reached the end
             requestAll();
         }
     }
 
-    // What to present: the frame at the position, or keep the previous one until it arrives.
-    FramePtr f = m_backend.frame(s, int32_t(m_position));
-    if (f) {
-        r.changed = f != m_shown;
-        m_shown = f;
+    // What to present: the pair at the position, or keep the previous pair until both arrive.
+    if (ready(map, m_position)) {
+        for (int s = 0; s < 2; ++s) {
+            FramePtr f;
+            TimelineMapper::Local l;
+            if (m_backend.isOpen(s)) {
+                l = map.local(s, m_position);
+                f = m_backend.frame(s, l.frame);
+            }
+            r.changed |= f != m_shown[size_t(s)];
+            m_shown[size_t(s)] = f;
+            m_shownLocal[size_t(s)] = l;
+        }
         m_shownNumber = m_position;
     }
-    r.frames[size_t(s)] = {m_shown, int32_t(m_shownNumber), m_shownNumber == m_position};
+    for (int s = 0; s < 2; ++s)
+        r.frames[size_t(s)] = {m_shown[size_t(s)], m_shownLocal[size_t(s)].frame, m_shownNumber == m_position,
+                               m_shownLocal[size_t(s)].hold};
     r.position = m_position;
     return r;
 }

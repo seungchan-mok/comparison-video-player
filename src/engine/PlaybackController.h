@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Engine.h"
+#include "engine/TimelineMapper.h"
 
 #include <array>
 #include <cstdint>
@@ -20,6 +21,7 @@ public:
     virtual double frameRate(int slot) const = 0;
     virtual FramePtr frame(int slot, int32_t n) const = 0;
     virtual void request(int slot, const PlaybackIntent& intent) = 0;
+    virtual FrameIndexPtr index(int) const { return nullptr; }  // exact times (timestamp sync)
 };
 
 class EngineBackend final : public PlaybackBackend {
@@ -35,6 +37,7 @@ public:
     double frameRate(int slot) const override;
     FramePtr frame(int slot, int32_t n) const override { return m_engine.frame(slot, n); }
     void request(int slot, const PlaybackIntent& intent) override { m_engine.request(slot, intent); }
+    FrameIndexPtr index(int slot) const override { return m_engine.index(slot); }
 
 private:
     Engine& m_engine;
@@ -51,6 +54,7 @@ struct DisplayFrame {
     FramePtr frame;
     int32_t number = -1;  // frame number of `frame`
     bool exact = false;   // frame == the requested position (false while it is still decoding)
+    bool hold = false;    // the timeline is outside this video: its first or last frame is held
 };
 
 struct TickResult {
@@ -62,10 +66,13 @@ struct TickResult {
 };
 
 // Transport logic on the UI thread: play/pause, frame steps, jumps, seeks, A-B loop and the
-// per-vsync tick that decides which frame to present. Positions are frame numbers of the main
-// video. Never blocks: when the next frame is not decoded yet, playback stalls and resumes from
-// there (re-anchored, no catch-up burst), and stepping keeps showing the previous frame until
-// the requested one arrives.
+// per-vsync tick that decides which frames to present. Positions are on the shared timeline
+// (TimelineMapper): with one video they are its frame numbers; with two, B is shown at A + offset
+// and a video outside the timeline holds its first or last frame. Lockstep: a position is shown
+// only when the frames of both videos are decoded, so a mismatched pair never reaches the
+// screen. Never blocks: when the next frame is not decoded yet, playback stalls and resumes from
+// there (re-anchored, no catch-up burst), and stepping keeps showing the previous pair until the
+// requested one arrives.
 class PlaybackController {
 public:
     explicit PlaybackController(PlaybackBackend& backend);
@@ -106,6 +113,13 @@ public:
     bool lengthFinal() const;
     double frameRate() const;
     int masterSlot() const;
+
+    // Two-video sync: B shows frame (A + offset). Changing it keeps the master frame on screen.
+    void setOffset(int64_t offset);
+    int64_t offset() const { return m_offset; }
+    void setSyncMode(SyncMode m);
+    SyncMode syncMode() const { return m_syncMode; }
+    TimelineMapper mapper() const;  // current mapping (lengths change while indexing)
     // True when the frame at position() is on screen: key repeat waits for this.
     bool positionShown() const { return m_shownNumber == m_position; }
     int lastDirection() const { return m_direction; }
@@ -114,11 +128,13 @@ private:
     void requestAll();
     void setPosition(int64_t p, int direction);
     int64_t clampPosition(int64_t p) const;
+    bool ready(const TimelineMapper& m, int64_t position) const;
 
     PlaybackBackend& m_backend;
     int64_t m_position = 0;
     int64_t m_shownNumber = -1;
-    FramePtr m_shown;
+    std::array<FramePtr, 2> m_shown;
+    std::array<TimelineMapper::Local, 2> m_shownLocal;
     bool m_playing = false;
     double m_speed = 1.0;
     int m_direction = 1;
@@ -130,6 +146,8 @@ private:
     int64_t m_loopFirst = -1;
     int64_t m_loopLast = -1;
     bool m_loopActive = false;
+    int64_t m_offset = 0;
+    SyncMode m_syncMode = SyncMode::Frame;
 };
 
 } // namespace scvp
