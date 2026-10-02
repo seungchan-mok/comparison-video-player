@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=SCVP
+GenericName=Comparison Video Player
+Comment=Frame-accurate side-by-side video comparison with pixel values
+Exec=scvp %F
+Terminal=false
+Categories=AudioVideo;Video;Player;
+MimeType=video/mp4;video/x-matroska;video/quicktime;video/x-msvideo;video/webm;video/mp2t;video/mpeg;video/x-flv;video/h264;video/h265;image/png;image/jpeg;image/tiff;
