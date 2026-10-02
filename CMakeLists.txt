@@ -26,6 +26,9 @@ find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets)
 qt_standard_project_setup()
 
 add_subdirectory(src)
+if(SCVP_BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()
 
 if(SCVP_BUILD_TESTS)
     find_package(Qt6 6.4 QUIET COMPONENTS Test)
