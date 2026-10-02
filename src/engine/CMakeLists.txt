@@ -11,6 +11,7 @@ add_library(scvp_engine STATIC
     IndexScanner.h IndexScanner.cpp
     Log.h Log.cpp
     Platform.h Platform.cpp
+    PrefetchPlanner.h PrefetchPlanner.cpp
     VideoSource.h
 )
 add_library(scvp::engine ALIAS scvp_engine)
