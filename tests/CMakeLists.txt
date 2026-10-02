@@ -17,13 +17,22 @@ target_include_directories(scvp_testsupport PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
 target_link_libraries(scvp_testsupport PUBLIC scvp::engine Qt6::Core Qt6::Test PRIVATE scvp::compile_options)
 target_compile_definitions(scvp_testsupport PRIVATE SCVP_FIXTURE_DIR="${SCVP_FIXTURE_DIR}")
 
-# scvp_add_test(<name> <sources...> [LIBS <targets...>])
+# scvp_add_test(<name> <sources...> [LIBS <targets...>] [FUNCTIONS <test functions...>])
+# With FUNCTIONS, every listed QtTest function becomes its own ctest entry so `ctest -j` runs
+# the slow fixture sweeps in parallel.
 function(scvp_add_test name)
-    cmake_parse_arguments(T "" "" "LIBS" ${ARGN})
+    cmake_parse_arguments(T "" "" "LIBS;FUNCTIONS" ${ARGN})
     add_executable(${name} ${T_UNPARSED_ARGUMENTS})
     target_link_libraries(${name} PRIVATE scvp_testsupport scvp::compile_options ${T_LIBS})
-    add_test(NAME ${name} COMMAND ${name})
-    set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    if(T_FUNCTIONS)
+        foreach(fn IN LISTS T_FUNCTIONS)
+            add_test(NAME ${name}.${fn} COMMAND ${name} ${fn})
+            set_tests_properties(${name}.${fn} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        endforeach()
+    else()
+        add_test(NAME ${name} COMMAND ${name})
+        set_tests_properties(${name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
 endfunction()
 
 add_subdirectory(engine)
