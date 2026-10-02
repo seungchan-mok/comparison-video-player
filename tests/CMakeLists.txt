@@ -17,6 +17,9 @@ target_include_directories(scvp_testsupport PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
 target_link_libraries(scvp_testsupport PUBLIC scvp::engine Qt6::Core Qt6::Test PRIVATE scvp::compile_options)
 target_compile_definitions(scvp_testsupport PRIVATE SCVP_FIXTURE_DIR="${SCVP_FIXTURE_DIR}")
 
+add_library(scvp_gltestsupport STATIC support/GlTestContext.h support/GlTestContext.cpp)
+target_link_libraries(scvp_gltestsupport PUBLIC scvp_testsupport scvp::render Qt6::Gui Qt6::OpenGL PRIVATE scvp::compile_options)
+
 # scvp_add_test(<name> <sources...> [LIBS <targets...>] [FUNCTIONS <test functions...>])
 # With FUNCTIONS, every listed QtTest function becomes its own ctest entry so `ctest -j` runs
 # the slow fixture sweeps in parallel.
