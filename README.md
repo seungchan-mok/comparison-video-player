@@ -62,6 +62,20 @@ cd build/release && cpack     # Linux: tar.gz, Windows: zip (windeployqt 포함)
 
 CI(`.github/workflows/build.yml`)가 세 OS에서 빌드·테스트·패키지를 만듭니다.
 
+### Linux 설치 (터미널 없이 실행, 기본 프로그램)
+
+```bash
+scripts/package-linux.sh                      # dist/scvp-<버전>-linux-x86_64/ 와 .tar.gz 생성 (Qt 포함)
+dist/scvp-*-linux-x86_64/install.sh           # 현재 사용자에게 설치 (root 불필요)
+```
+
+- 프로그램은 `~/.local/opt/scvp`, 실행 링크는 `~/.local/bin/scvp` 에 설치되고, 애플리케이션 메뉴(활동 → "SCVP" 검색, 독에 고정 가능), 아이콘, 파일 형식이 등록됩니다.
+- 영상 파일을 오른쪽 클릭 → **다른 애플리케이션으로 열기 → SCVP**. 두 파일을 선택해 열면 A/B 비교로 열립니다.
+- 그냥 설치하면 기존 기본 프로그램은 바뀌지 않습니다. 다만 다른 프로그램이 열지 못하던 raw 형식(.h264/.h265/.yuv/.y4m/.ivf 등)은 SCVP로 열립니다.
+- 기본 프로그램으로 쓰려면: 앱 메뉴 **File → Make SCVP the Default Video Player...**, 또는 `install.sh --set-default`, 또는 설정 → 앱 → 기본 앱 → 비디오. 되돌릴 때도 설정 → 기본 앱에서 고르면 됩니다.
+- 삭제: `~/.local/opt/scvp/install.sh --uninstall` (SCVP를 가리키는 기본 프로그램 설정도 함께 지웁니다).
+- FFmpeg 라이브러리는 시스템 것을 씁니다(Ubuntu 24.04: `sudo apt install ffmpeg`).
+
 ## 사용법
 
 ```
