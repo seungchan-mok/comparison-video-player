@@ -224,6 +224,11 @@ bool VideoView::nearWipeDivider(QPointF logical) const
 
 void VideoView::mousePressEvent(QMouseEvent* e)
 {
+    if (e->button() == Qt::BackButton || e->button() == Qt::ForwardButton) {
+        emit stepRequested(e->button() == Qt::BackButton ? -1 : 1);
+        e->accept();
+        return;
+    }
     if (e->button() == Qt::LeftButton && nearWipeDivider(e->position())) {
         m_draggingWipe = true;
         e->accept();

@@ -41,6 +41,7 @@ public:
 
 signals:
     void doubleClicked();
+    void stepRequested(int frames);  // mouse back / forward buttons
     void viewChanged();  // zoom/pan changed
     void compareChanged();  // the wipe divider was dragged
     // Values of the pixel under the cursor (invalid when it is not over the image).

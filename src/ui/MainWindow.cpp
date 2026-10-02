@@ -52,6 +52,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_player, &Player::positionChanged, this, [this] { updateTitle(); });
     connect(m_player, &Player::mediaChanged, this, [this] { updateTitle(); });
     connect(m_view, &VideoView::doubleClicked, this, &MainWindow::toggleFullscreen);
+    connect(m_view, &VideoView::stepRequested, this, [this](int n) { handleAction(n < 0 ? Action::StepBack : Action::StepForward, false); });
     connect(m_view, &VideoView::compareChanged, m_hud, qOverload<>(&QWidget::update));
     connect(m_view, &VideoView::sampleChanged, this, [this](const render::PixelSample& s) { m_hud->setPixelText(formatPixelSample(s)); });
     connect(m_player, &Player::mediaChanged, m_hud, qOverload<>(&QWidget::update));
