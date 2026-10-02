@@ -2,10 +2,12 @@ add_library(scvp_ui STATIC
     ControlBar.h ControlBar.cpp
     EngineBridge.h EngineBridge.cpp
     FramePacer.h FramePacer.cpp
+    HudOverlay.h HudOverlay.cpp
     KeyMap.h KeyMap.cpp
     KeyRouter.h KeyRouter.cpp
     MainWindow.h MainWindow.cpp
     Player.h Player.cpp
+    Stage.h Stage.cpp
     TimelineModel.h
     TimelineWidget.h TimelineWidget.cpp
     VideoView.h VideoView.cpp

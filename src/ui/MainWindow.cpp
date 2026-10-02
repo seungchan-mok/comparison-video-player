@@ -1,13 +1,14 @@
 #include "ui/MainWindow.h"
 
 #include "ui/ControlBar.h"
+#include "ui/HudOverlay.h"
 #include "ui/KeyRouter.h"
 #include "ui/Player.h"
+#include "ui/Stage.h"
 #include "ui/VideoView.h"
 
 #include <QFileInfo>
 #include <QMessageBox>
-#include <QVBoxLayout>
 
 namespace scvp::ui {
 
@@ -16,15 +17,12 @@ MainWindow::MainWindow(QWidget* parent)
     , m_view(new VideoView(this))
     , m_player(new Player(m_view, this))
     , m_controls(new ControlBar(m_player, this))
+    , m_stage(new Stage(m_view, m_controls, this))
+    , m_hud(new HudOverlay(m_player, m_view))
     , m_keys(new KeyRouter(this, m_view, KeyMap::defaults(), [this] { return m_player->controller().positionShown(); }, this))
 {
-    auto* central = new QWidget(this);
-    auto* layout = new QVBoxLayout(central);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
-    layout->addWidget(m_view, 1);
-    layout->addWidget(m_controls);
-    setCentralWidget(central);
+    setCentralWidget(m_stage);
+    connect(m_player, &Player::stalledChanged, m_hud, &HudOverlay::setStalled);
     connect(m_keys, &KeyRouter::triggered, this, &MainWindow::handleAction);
     resize(1280, 760);
     connect(m_player, &Player::positionChanged, this, [this] { updateTitle(); });
@@ -59,7 +57,13 @@ void MainWindow::updateTitle()
     setWindowTitle(t);
 }
 
-void MainWindow::toggleFullscreen() { isFullScreen() ? showNormal() : showFullScreen(); }
+void MainWindow::toggleFullscreen()
+{
+    const bool on = !isFullScreen();
+    m_stage->setFullscreenMode(on);
+    on ? showFullScreen() : showNormal();
+    m_view->setFocus();
+}
 
 void MainWindow::handleAction(Action a, bool)
 {
@@ -84,8 +88,9 @@ void MainWindow::handleAction(Action a, bool)
     case Action::Fullscreen: toggleFullscreen(); break;
     case Action::ExitFullscreen:
         if (isFullScreen())
-            showNormal();
+            toggleFullscreen();
         break;
+    case Action::InfoOverlay: m_hud->setInfoVisible(!m_hud->infoVisible()); break;
     default: break;  // comparison, offset and pixel-inspection actions arrive with their features
     }
 }

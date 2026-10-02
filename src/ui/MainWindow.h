@@ -7,7 +7,9 @@
 namespace scvp::ui {
 
 class ControlBar;
+class HudOverlay;
 class KeyRouter;
+class Stage;
 class Player;
 class VideoView;
 
@@ -30,6 +32,8 @@ private:
     VideoView* m_view;
     Player* m_player;
     ControlBar* m_controls;
+    Stage* m_stage;
+    HudOverlay* m_hud;
     KeyRouter* m_keys;
 };
 

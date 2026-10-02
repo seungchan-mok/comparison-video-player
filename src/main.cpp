@@ -1,4 +1,5 @@
 #include "engine/FfmpegCompat.h"
+#include "ui/KeyMap.h"
 #include "ui/MainWindow.h"
 
 #include "ui/Player.h"
@@ -63,7 +64,8 @@ int main(int argc, char* argv[])
     QCommandLineOption debugPlay(QStringLiteral("debug-play"), QStringLiteral("Start playback after opening."));
     QCommandLineOption debugSize(QStringLiteral("debug-size"), QStringLiteral("Window size WxH."), QStringLiteral("WxH"));
     QCommandLineOption debugGrabWindow(QStringLiteral("debug-grab-window"), QStringLiteral("Grab the whole window, not just the video."));
-    for (const auto& o : {debugGrab, debugAfter, debugSeek, debugPlay, debugSize, debugGrabWindow}) {
+    QCommandLineOption debugActions(QStringLiteral("debug-actions"), QStringLiteral("Comma separated actions to trigger after opening (e.g. info_overlay,fullscreen)."), QStringLiteral("ids"));
+    for (const auto& o : {debugGrab, debugAfter, debugSeek, debugPlay, debugSize, debugGrabWindow, debugActions}) {
         QCommandLineOption hidden = o;
         hidden.setFlags(QCommandLineOption::HiddenFromHelp);
         parser.addOption(hidden);
@@ -85,6 +87,15 @@ int main(int argc, char* argv[])
             window.player()->seek(parser.value(debugSeek).toLongLong());
         if (parser.isSet(debugPlay))
             window.player()->togglePlay();
+    }
+    if (parser.isSet(debugActions)) {
+        const QStringList ids = parser.value(debugActions).split(QLatin1Char(','), Qt::SkipEmptyParts);
+        QTimer::singleShot(200, &window, [&window, ids] {
+            for (const QString& id : ids)
+                for (int a = 0; a < int(scvp::ui::Action::Count); ++a)
+                    if (id == QLatin1String(scvp::ui::KeyMap::info(scvp::ui::Action(a)).id))
+                        window.handleAction(scvp::ui::Action(a), false);
+        });
     }
     if (parser.isSet(debugGrab)) {
         const QString out = parser.value(debugGrab);
