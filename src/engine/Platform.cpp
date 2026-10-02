@@ -15,6 +15,22 @@
 
 namespace scvp::platform {
 
+std::FILE* fopenUtf8(const std::string& path, const char* mode)
+{
+#if defined(_WIN32)
+    auto widen = [](const std::string& s) {
+        const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+        std::wstring w(size_t(n > 0 ? n - 1 : 0), L'\0');
+        if (n > 1)
+            MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), n);
+        return w;
+    };
+    return _wfopen(widen(path).c_str(), widen(mode).c_str());
+#else
+    return std::fopen(path.c_str(), mode);
+#endif
+}
+
 void lowerCurrentThreadPriority(int niceDelta)
 {
 #if defined(_WIN32)

@@ -6,6 +6,7 @@ add_library(scvp_ui STATIC
     KeyMap.h KeyMap.cpp
     KeyRouter.h KeyRouter.cpp
     MainWindow.h MainWindow.cpp
+    OpenRawDialog.h OpenRawDialog.cpp
     PixelInspector.h PixelInspector.cpp
     Player.h Player.cpp
     Settings.h Settings.cpp

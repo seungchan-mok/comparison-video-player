@@ -63,6 +63,8 @@ int main(int argc, char* argv[])
     parser.addOption(offset);
     QCommandLineOption sync(QStringLiteral("sync"), QStringLiteral("Pair frames by number (frame, default) or by time (time)."), QStringLiteral("mode"));
     parser.addOption(sync);
+    QCommandLineOption raw(QStringLiteral("raw"), QStringLiteral("Open the files as raw video: WxH:pix_fmt[:fps[:header bytes]]."), QStringLiteral("spec"));
+    parser.addOption(raw);
     QCommandLineOption view(QStringLiteral("view"), QStringLiteral("Comparison: split, sbs, tb, wipe, flip, diff."), QStringLiteral("mode"));
     parser.addOption(view);
     QCommandLineOption cacheMb(QStringLiteral("cache-mb"), QStringLiteral("Decoded frame cache budget for this run (MB)."), QStringLiteral("MB"));
@@ -107,6 +109,21 @@ int main(int argc, char* argv[])
             window.resize(wh[0].toInt(), wh[1].toInt());
     }
     window.show();
+    if (parser.isSet(raw)) {
+        const QStringList parts = parser.value(raw).split(QLatin1Char(':'));
+        const QStringList wh = parts.value(0).split(QLatin1Char('x'));
+        scvp::RawVideoParams p;
+        p.width = wh.value(0).toInt();
+        p.height = wh.value(1).toInt();
+        p.format = av_get_pix_fmt(parts.value(1).toLatin1().constData());
+        p.frameRate = parts.value(2).toDouble();
+        p.headerBytes = parts.value(3).toLongLong();
+        if (!p.valid()) {
+            std::fprintf(stderr, "--raw expects WxH:pix_fmt[:fps[:header]], e.g. 1920x1080:nv12:30\n");
+            return 2;
+        }
+        window.setRawOverride(p);
+    }
     const QStringList files = parser.positionalArguments();
     if (files.size() >= 2)
         window.openFile(1, files[1]);

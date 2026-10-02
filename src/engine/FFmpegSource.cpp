@@ -1,5 +1,7 @@
 #include "engine/FFmpegSource.h"
 
+#include "engine/RawVideoSource.h"
+
 #include "engine/GpuFrame.h"
 #include "engine/HwDevice.h"
 #include "engine/Log.h"
@@ -688,6 +690,16 @@ std::unique_ptr<IDecodeSession> FFmpegSource::openSession(const SessionConfig& c
 
 std::unique_ptr<IVideoSource> openVideoSource(const std::string& path, const InputOptions& opts, std::string* error)
 {
+    if (opts.raw)
+        return RawVideoSource::open(path, *opts.raw, error);
+    if (isRawVideoExtension(path)) {
+        const RawVideoParams p = parseRawVideoName(path);
+        if (p.valid())
+            return RawVideoSource::open(path, p, error);
+        if (error)
+            *error = "raw video: give the frame size and pixel format (e.g. name it clip_1920x1080_nv12.yuv)";
+        return nullptr;
+    }
     return FFmpegSource::open(path, opts, error);
 }
 

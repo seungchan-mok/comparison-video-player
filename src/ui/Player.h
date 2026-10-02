@@ -21,7 +21,9 @@ public:
     explicit Player(VideoView* view, QObject* parent = nullptr);
     ~Player() override;
 
-    bool open(int slot, const QString& path, QString* error);
+    bool open(int slot, const QString& path, const InputOptions& opts, QString* error);
+    bool open(int slot, const QString& path, QString* error) { return open(slot, path, InputOptions{}, error); }
+    const InputOptions& inputOptions(int slot) const { return m_inputs[size_t(slot)]; }
     void close(int slot);
     bool isOpen(int slot) const { return m_engine.isOpen(slot); }
 
@@ -85,6 +87,7 @@ private:
     FramePacer* m_pacer;
     VideoView* m_view;
     TickResult m_lastTick;
+    std::array<InputOptions, 2> m_inputs;
     int64_t m_lastPosition = -1;
     bool m_lastPlaying = false;
     bool m_lastStalled = false;

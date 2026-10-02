@@ -195,6 +195,37 @@ private slots:
         QVERIFY(img.pixelColor(int(c.x()), int(c.y())) != QColor(30, 30, 32));
     }
 
+    // A raw .yuv opens by its name (clip_320x240_nv12.yuv) and shows the exact frame.
+    void rawVideoOpensByName()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        const auto fx = test::fixture(QStringLiteral("raw_nv12"));
+        QString log;
+        const QImage img = grab({fx->path},
+                                {QStringLiteral("--debug-seek"), QStringLiteral("17"), QStringLiteral("--debug-hover"), QStringLiteral("100,100"),
+                                 QStringLiteral("--debug-after"), QStringLiteral("1500")},
+                                &log);
+        if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
+            QSKIP("Xvfb not available");
+        QVERIFY2(!img.isNull(), qPrintable(log));
+        QVERIFY2(log.contains(QLatin1String("(frame 17)")), qPrintable(log));
+        const QRegularExpressionMatch m =
+            QRegularExpression(QStringLiteral("debug-inspector: A \\((\\d+),(\\d+)\\) RGB \\d+ \\d+ \\d+  code (\\d+) (\\d+) (\\d+)")).match(log);
+        QVERIFY2(m.hasMatch(), qPrintable(log));
+        // Codes straight from the file: Y plane then interleaved UV.
+        QFile f(fx->path);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const int x = m.captured(1).toInt(), y = m.captured(2).toInt();
+        const qint64 frame = 17LL * 320 * 240 * 3 / 2;
+        f.seek(frame + y * 320 + x);
+        const int Y = uchar(f.read(1)[0]);
+        f.seek(frame + 320 * 240 + (y / 2) * 320 + (x / 2) * 2);
+        const QByteArray uv = f.read(2);
+        QCOMPARE(m.captured(3).toInt(), Y);
+        QCOMPARE(m.captured(4).toInt(), int(uchar(uv[0])));
+        QCOMPARE(m.captured(5).toInt(), int(uchar(uv[1])));
+    }
+
     // Hovering reads the pixel back from the GPU: synced A and B agree and match the decoder.
     void inspectorReadsThePixelUnderTheCursor()
     {

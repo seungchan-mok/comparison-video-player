@@ -1,8 +1,11 @@
 #include "ui/MainWindow.h"
 
+#include "engine/RawVideoSource.h"
+
 #include "ui/ControlBar.h"
 #include "ui/HudOverlay.h"
 #include "ui/KeyRouter.h"
+#include "ui/OpenRawDialog.h"
 #include "ui/PixelInspector.h"
 #include "ui/Player.h"
 #include "ui/Stage.h"
@@ -57,10 +60,23 @@ MainWindow::MainWindow(QWidget* parent)
 
 MainWindow::~MainWindow() = default;
 
-bool MainWindow::openFile(int slot, const QString& path)
+bool MainWindow::openFile(int slot, const QString& path, bool askRaw)
 {
+    InputOptions opts;
+    if (m_rawOverride) {
+        opts.raw = m_rawOverride;
+    } else if (askRaw || isRawVideoExtension(path.toUtf8().toStdString())) {
+        RawVideoParams p = parseRawVideoName(path.toUtf8().toStdString());
+        if (askRaw || !p.valid()) {
+            const std::optional<RawVideoParams> asked = OpenRawDialog::ask(this, path, p);
+            if (!asked)
+                return false;
+            p = *asked;
+        }
+        opts.raw = p;
+    }
     QString err;
-    if (!m_player->open(slot, path, &err)) {
+    if (!m_player->open(slot, path, opts, &err)) {
         QMessageBox::warning(this, tr("Cannot open file"), tr("%1\n\n%2").arg(path, err));
         return false;
     }
@@ -207,6 +223,8 @@ void MainWindow::createMenus()
     openA->setShortcut(QKeySequence::Open);
     QAction* openB = file->addAction(tr("Open &B (compare)..."), this, [this] { openDialog(1); });
     openB->setShortcut(QKeySequence(Qt::ControlModifier | Qt::ShiftModifier | Qt::Key_O));
+    file->addAction(tr("Open raw video as A..."), this, [this] { openDialog(0, true); });
+    file->addAction(tr("Open raw video as B..."), this, [this] { openDialog(1, true); });
     file->addSeparator();
     QAction* close = file->addAction(tr("&Close A"), this, [this] { m_player->close(0); updateTitle(); });
     close->setShortcut(QKeySequence(Qt::ControlModifier | Qt::Key_W));
@@ -342,9 +360,10 @@ void MainWindow::reopenAll()
         if (!m_player->slotOpen(slot))
             continue;
         const QString path = QString::fromStdString(m_player->engine().info(slot).path);
+        const InputOptions opts = m_player->inputOptions(slot);
         m_player->close(slot);
         QString err;
-        m_player->open(slot, path, &err);
+        m_player->open(slot, path, opts, &err);
     }
     m_player->seek(pos);
 }
@@ -370,7 +389,7 @@ void MainWindow::showSettings()
     s.save();
 }
 
-void MainWindow::openDialog(int slot)
+void MainWindow::openDialog(int slot, bool raw)
 {
     const QString filter = tr("Videos and images (*.mp4 *.mkv *.mov *.avi *.webm *.ts *.m2ts *.mts *.mpg *.mpeg *.m4v *.flv "
                               "*.wmv *.mxf *.y4m *.h264 *.264 *.h265 *.265 *.hevc *.ivf *.obu *.yuv *.png *.jpg *.jpeg *.tif *.tiff);;"
@@ -379,7 +398,7 @@ void MainWindow::openDialog(int slot)
     if (path.isEmpty())
         return;
     m_settings.lastDir = QFileInfo(path).absolutePath();
-    openFile(slot, path);
+    openFile(slot, path, raw);
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* e)

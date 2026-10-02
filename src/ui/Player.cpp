@@ -33,10 +33,11 @@ Player::~Player()
         m_engine.close(s);
 }
 
-bool Player::open(int slot, const QString& path, QString* error)
+bool Player::open(int slot, const QString& path, const InputOptions& opts, QString* error)
 {
     std::string err;
-    if (!m_engine.open(slot, path.toUtf8().toStdString(), InputOptions{}, &err)) {
+    m_inputs[size_t(slot)] = opts;
+    if (!m_engine.open(slot, path.toUtf8().toStdString(), opts, &err)) {
         if (error)
             *error = QString::fromStdString(err);
         return false;
@@ -148,6 +149,7 @@ void Player::swapSlots()
     if (!m_engine.isOpen(0) && !m_engine.isOpen(1))
         return;
     m_engine.swapSlots();
+    std::swap(m_inputs[0], m_inputs[1]);
     m_controller.slotsSwapped();
     refresh();
     emit mediaChanged();

@@ -7,6 +7,8 @@
 
 #include <QMainWindow>
 
+#include <optional>
+
 namespace scvp::ui {
 
 class ControlBar;
@@ -22,13 +24,15 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
 
-    bool openFile(int slot, const QString& path);
+    // Raw video files without their geometry in the name ask for it (askRaw forces the dialog).
+    bool openFile(int slot, const QString& path, bool askRaw = false);
+    void setRawOverride(const RawVideoParams& p) { m_rawOverride = p; }  // command line --raw
     Player* player() const { return m_player; }
     VideoView* view() const { return m_view; }
 
     void handleAction(Action a, bool autoRepeat);
     void toggleFullscreen();
-    void openDialog(int slot);
+    void openDialog(int slot, bool raw = false);
     void showSettings();
     void applySettings(const AppSettings& s);
     void overrideCacheBudget(size_t bytes);  // command line: this run only
@@ -56,6 +60,7 @@ private:
     HudOverlay* m_hud;
     KeyRouter* m_keys;
     AppSettings m_settings;
+    std::optional<RawVideoParams> m_rawOverride;
     QList<QPair<QAction*, Action>> m_menuActions;
 };
 
