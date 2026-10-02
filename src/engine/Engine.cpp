@@ -357,14 +357,31 @@ void Engine::setIndexCallback(std::function<void(int)> cb)
     m_indexCb = std::move(cb);
 }
 
-void Engine::onFrames(int slot, uint64_t epoch)
+int Engine::slotOfLocked(uint64_t epoch) const
+{
+    for (int i = 0; i < kSlots; ++i)
+        if (m_slots[size_t(i)] && m_slots[size_t(i)]->epoch == epoch)
+            return i;
+    return -1;
+}
+
+void Engine::swapSlots()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::swap(m_slots[0], m_slots[1]);
+}
+
+// Callbacks identify their video by epoch: slots may have been swapped since it was opened.
+void Engine::onFrames(int, uint64_t epoch)
 {
     std::function<void(int)> cb;
+    int slot;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        Slot* s = m_slots[size_t(slot)].get();
-        if (!s || s->epoch != epoch)
+        slot = slotOfLocked(epoch);
+        if (slot < 0)
             return;
+        Slot* s = m_slots[size_t(slot)].get();
         // The first decoded frames replace the size estimate the budget split was based on, and
         // tell whether the VRAM tier is in use.
         const size_t fb = s->lane->frameBytes();
@@ -381,14 +398,16 @@ void Engine::onFrames(int slot, uint64_t epoch)
         cb(slot);
 }
 
-void Engine::onIndex(int slot, uint64_t epoch)
+void Engine::onIndex(int, uint64_t epoch)
 {
     std::function<void(int)> cb;
+    int slot;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        Slot* s = m_slots[size_t(slot)].get();
-        if (!s || s->epoch != epoch)
+        slot = slotOfLocked(epoch);
+        if (slot < 0)
             return;
+        Slot* s = m_slots[size_t(slot)].get();
         if (s->source->indexComplete())
             s->cache->dropProvisional();
         replanLocked(*s);

@@ -9,6 +9,8 @@
 
 #include "ui/SettingsDialog.h"
 
+#include <algorithm>
+
 #include <QCloseEvent>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -19,6 +21,8 @@
 #include <QMimeData>
 
 namespace scvp::ui {
+
+render::CompareSettings nextCompare(render::CompareSettings c, Action a, render::SplitOrientation shown);
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -41,6 +45,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_player, &Player::positionChanged, this, [this] { updateTitle(); });
     connect(m_player, &Player::mediaChanged, this, [this] { updateTitle(); });
     connect(m_view, &VideoView::doubleClicked, this, &MainWindow::toggleFullscreen);
+    connect(m_view, &VideoView::compareChanged, m_hud, qOverload<>(&QWidget::update));
+    connect(m_player, &Player::mediaChanged, m_hud, qOverload<>(&QWidget::update));
     updateTitle();
 }
 
@@ -60,13 +66,15 @@ bool MainWindow::openFile(int slot, const QString& path)
 void MainWindow::updateTitle()
 {
     QString t = QStringLiteral("SCVP");
-    if (m_player->isOpen(0)) {
-        const auto info = m_player->engine().info(0);
+    QStringList names;
+    for (int slot = 0; slot < Engine::kSlots; ++slot)
+        if (m_player->isOpen(slot))
+            names << QFileInfo(QString::fromStdString(m_player->engine().info(slot).path)).fileName();
+    if (!names.isEmpty())
         t = QStringLiteral("%1 — %2 / %3 — SCVP")
-                .arg(QFileInfo(QString::fromStdString(info.path)).fileName())
+                .arg(names.join(QStringLiteral(" | ")))
                 .arg(m_player->controller().position())
                 .arg(m_player->controller().length());
-    }
     setWindowTitle(t);
 }
 
@@ -105,8 +113,55 @@ void MainWindow::handleAction(Action a, bool)
             toggleFullscreen();
         break;
     case Action::InfoOverlay: m_hud->setInfoVisible(!m_hud->infoVisible()); break;
-    default: break;  // comparison, offset and pixel-inspection actions arrive with their features
+    case Action::OffsetMinus: m_player->setOffset(m_player->offset() - 1); break;
+    case Action::OffsetPlus: m_player->setOffset(m_player->offset() + 1); break;
+    case Action::SwapAB: m_player->swapSlots(); updateTitle(); break;
+    case Action::ViewCycle:
+    case Action::ViewSideBySide:
+    case Action::ViewWipe:
+    case Action::ViewFlip:
+    case Action::ViewDifference:
+    case Action::DiffGainUp:
+    case Action::DiffGainDown: setCompare(nextCompare(m_view->compare(), a, m_view->layout().orientation)); break;
+    default: break;  // pixel-inspection actions arrive with their feature
     }
+}
+
+render::CompareSettings nextCompare(render::CompareSettings c, Action a, render::SplitOrientation shown)
+{
+    using render::CompareMode;
+    switch (a) {
+    case Action::ViewCycle:
+        c.mode = c.mode == CompareMode::Split ? CompareMode::Wipe
+                 : c.mode == CompareMode::Wipe ? CompareMode::Flip
+                 : c.mode == CompareMode::Flip ? CompareMode::Difference
+                                               : CompareMode::Split;
+        break;
+    case Action::ViewSideBySide:
+        // Again in split mode: switch between side by side and top/bottom.
+        if (c.mode == CompareMode::Split)
+            c.orientation = shown == render::SplitOrientation::SideBySide ? render::SplitOrientation::TopBottom
+                                                                          : render::SplitOrientation::SideBySide;
+        c.mode = CompareMode::Split;
+        break;
+    case Action::ViewWipe: c.mode = CompareMode::Wipe; break;
+    case Action::ViewFlip:
+        // Flip toggles which video is shown; entering it from another mode shows B first.
+        c.flipShowsB = c.mode == CompareMode::Flip ? !c.flipShowsB : true;
+        c.mode = CompareMode::Flip;
+        break;
+    case Action::ViewDifference: c.mode = CompareMode::Difference; break;
+    case Action::DiffGainUp: c.diffGain = std::min(256.0, c.diffGain * 2); break;
+    case Action::DiffGainDown: c.diffGain = std::max(1.0, c.diffGain / 2); break;
+    default: break;
+    }
+    return c;
+}
+
+void MainWindow::setCompare(const render::CompareSettings& c)
+{
+    m_view->setCompare(c);
+    m_hud->update();
 }
 
 QAction* MainWindow::playerAction(QMenu* menu, Action a)
@@ -121,11 +176,15 @@ QAction* MainWindow::playerAction(QMenu* menu, Action a)
 void MainWindow::createMenus()
 {
     QMenu* file = menuBar()->addMenu(tr("&File"));
-    QAction* openA = file->addAction(tr("&Open..."), this, [this] { openDialog(0); });
+    QAction* openA = file->addAction(tr("&Open A..."), this, [this] { openDialog(0); });
     openA->setShortcut(QKeySequence::Open);
+    QAction* openB = file->addAction(tr("Open &B (compare)..."), this, [this] { openDialog(1); });
+    openB->setShortcut(QKeySequence(Qt::ControlModifier | Qt::ShiftModifier | Qt::Key_O));
     file->addSeparator();
-    QAction* close = file->addAction(tr("&Close"), this, [this] { m_player->close(0); updateTitle(); });
+    QAction* close = file->addAction(tr("&Close A"), this, [this] { m_player->close(0); updateTitle(); });
     close->setShortcut(QKeySequence(Qt::ControlModifier | Qt::Key_W));
+    QAction* closeB = file->addAction(tr("Close B"), this, [this] { m_player->close(1); updateTitle(); });
+    closeB->setShortcut(QKeySequence(Qt::ControlModifier | Qt::ShiftModifier | Qt::Key_W));
     file->addSeparator();
     QAction* settings = file->addAction(tr("&Settings..."), this, &MainWindow::showSettings);
     settings->setShortcut(QKeySequence::Preferences);
@@ -134,7 +193,7 @@ void MainWindow::createMenus()
     quit->setShortcut(QKeySequence::Quit);
     quit->setMenuRole(QAction::QuitRole);
     // App commands must also work while the menu bar is hidden (fullscreen).
-    addActions({openA, close, settings, quit});
+    addActions({openA, openB, close, closeB, settings, quit});
 
     QMenu* play = menuBar()->addMenu(tr("&Playback"));
     for (Action a : {Action::PlayPause, Action::StepForward, Action::StepBack, Action::JumpForward, Action::JumpBack,
@@ -150,6 +209,14 @@ void MainWindow::createMenus()
     view->addSeparator();
     for (Action a : {Action::InfoOverlay, Action::Fullscreen})
         playerAction(view, a);
+
+    QMenu* compare = menuBar()->addMenu(tr("&Compare"));
+    for (Action a : {Action::ViewCycle, Action::ViewSideBySide, Action::ViewWipe, Action::ViewFlip, Action::ViewDifference,
+                     Action::DiffGainUp, Action::DiffGainDown})
+        playerAction(compare, a);
+    compare->addSeparator();
+    for (Action a : {Action::OffsetMinus, Action::OffsetPlus, Action::SwapAB})
+        playerAction(compare, a);
 }
 
 void MainWindow::applySettings(const AppSettings& s)
@@ -234,15 +301,27 @@ void MainWindow::dragEnterEvent(QDragEnterEvent* e)
             }
 }
 
+// One file: dropped on the left (or top) half it becomes A, on the other half B. Two files: A and B.
 void MainWindow::dropEvent(QDropEvent* e)
 {
+    QStringList files;
     for (const QUrl& u : e->mimeData()->urls())
-        if (u.isLocalFile()) {
-            openFile(0, u.toLocalFile());
-            m_settings.lastDir = QFileInfo(u.toLocalFile()).absolutePath();
-            e->acceptProposedAction();
-            return;
-        }
+        if (u.isLocalFile())
+            files << u.toLocalFile();
+    if (files.isEmpty())
+        return;
+    e->acceptProposedAction();
+    m_settings.lastDir = QFileInfo(files.front()).absolutePath();
+    if (files.size() >= 2) {
+        openFile(0, files[0]);
+        openFile(1, files[1]);
+        return;
+    }
+    const QPointF at = m_view->mapFrom(this, e->position().toPoint());
+    const bool vertical = m_view->compare().mode == render::CompareMode::Split &&
+                          m_view->layout().orientation == render::SplitOrientation::TopBottom && m_player->slotOpen(1);
+    const bool second = vertical ? at.y() > m_view->height() / 2.0 : at.x() > m_view->width() / 2.0;
+    openFile(second && m_player->slotOpen(0) ? 1 : 0, files[0]);
 }
 
 void MainWindow::closeEvent(QCloseEvent* e)

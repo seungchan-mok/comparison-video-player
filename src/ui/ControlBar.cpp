@@ -6,6 +6,7 @@
 #include <QAbstractItemView>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -53,6 +54,8 @@ ControlBar::ControlBar(Player* player, QWidget* parent)
     , m_jumpLarge(makeJumpBox(this, 30))
     , m_jumpUnit(new QComboBox(this))
     , m_speed(new QComboBox(this))
+    , m_offset(new QSpinBox(this))
+    , m_offsetLabel(new QLabel(tr("B offset"), this))
     , m_loop(new QToolButton(this))
     , m_loopLabel(new QLabel(this))
     , m_cache(new QLabel(this))
@@ -83,6 +86,14 @@ ControlBar::ControlBar(Player* player, QWidget* parent)
     m_speed->setToolTip(tr("Playback speed"));
     connect(m_speed, &QComboBox::currentIndexChanged, this, [this](int i) { m_player->setSpeed(m_speed->itemData(i).toDouble()); });
 
+    m_offset->setRange(-1000000, 1000000);
+    m_offset->setKeyboardTracking(false);
+    m_offset->setFocusPolicy(Qt::ClickFocus);
+    m_offset->setFixedWidth(72);
+    m_offset->setAlignment(Qt::AlignRight);
+    m_offset->setToolTip(tr("B shows frame A + offset (< and > change it)"));
+    connect(m_offset, &QSpinBox::valueChanged, this, [this](int v) { m_player->setOffset(v); });
+
     m_loop->setText(tr("Loop"));
     m_loop->setCheckable(true);
     m_loop->setFocusPolicy(Qt::NoFocus);
@@ -104,6 +115,9 @@ ControlBar::ControlBar(Player* player, QWidget* parent)
     row->addWidget(m_jumpLarge);
     row->addWidget(m_jumpUnit);
     row->addSpacing(8);
+    row->addWidget(m_offsetLabel);
+    row->addWidget(m_offset);
+    row->addSpacing(8);
     row->addWidget(m_speed);
     row->addWidget(m_loop);
     row->addWidget(m_loopLabel);
@@ -121,6 +135,7 @@ ControlBar::ControlBar(Player* player, QWidget* parent)
     connect(m_player, &Player::transportChanged, this, &ControlBar::syncTransport);
     connect(m_player, &Player::transportChanged, m_timeline, &TimelineWidget::modelChanged);
     connect(m_player, &Player::mediaChanged, this, [this] {
+        syncOffset();
         syncTransport();
         syncPosition();
         m_timeline->modelChanged();
@@ -128,8 +143,20 @@ ControlBar::ControlBar(Player* player, QWidget* parent)
     m_stats.setInterval(250);
     connect(&m_stats, &QTimer::timeout, this, &ControlBar::syncStats);
     m_stats.start();
+    syncOffset();
     syncTransport();
     syncPosition();
+}
+
+void ControlBar::syncOffset()
+{
+    const bool two = m_player->slotOpen(0) && m_player->slotOpen(1);
+    m_offset->setVisible(two);
+    m_offsetLabel->setVisible(two);
+    if (m_offset->value() != m_player->offset()) {
+        const QSignalBlocker block(m_offset);
+        m_offset->setValue(int(m_player->offset()));
+    }
 }
 
 void ControlBar::setJumpSettings(const JumpSettings& j)

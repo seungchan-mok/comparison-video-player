@@ -127,6 +127,32 @@ void Player::setLoop(int64_t first, int64_t last)
     emit transportChanged();
 }
 
+void Player::setOffset(int64_t offset)
+{
+    if (offset == m_controller.offset())
+        return;
+    m_controller.setOffset(offset);
+    refresh();
+    emit mediaChanged();  // the timeline changed
+}
+
+void Player::setSyncMode(SyncMode m)
+{
+    m_controller.setSyncMode(m);
+    refresh();
+    emit mediaChanged();
+}
+
+void Player::swapSlots()
+{
+    if (!m_engine.isOpen(0) && !m_engine.isOpen(1))
+        return;
+    m_engine.swapSlots();
+    m_controller.slotsSwapped();
+    refresh();
+    emit mediaChanged();
+}
+
 int64_t Player::indexedFrames() const
 {
     FrameIndexPtr idx = m_engine.index(m_controller.masterSlot());
@@ -156,6 +182,7 @@ void Player::refresh() { present(m_controller.tick(m_pacer->now())); }
 
 void Player::present(const TickResult& r)
 {
+    m_lastTick = r;
     if (r.changed)
         m_view->setFrames({r.frames[0].frame, r.frames[1].frame});
     m_pacer->setActive(m_controller.playing());

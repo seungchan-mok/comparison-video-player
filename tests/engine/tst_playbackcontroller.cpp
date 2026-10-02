@@ -403,6 +403,29 @@ private slots:
         QCOMPARE(b.intents[1].back().loop.last, 20);
     }
 
+    void swapKeepsTheTimeline()
+    {
+        TwoBackend b;
+        b.frames[1] = 80;
+        b.all();
+        PlaybackController c(b);
+        c.mediaChanged();
+        c.setOffset(7);
+        c.seek(30);
+        TickResult r = c.tick(0);
+        const int32_t a = r.frames[0].number, bb = r.frames[1].number;
+        const int64_t len = c.length();
+        std::swap(b.frames[0], b.frames[1]);
+        std::swap(b.available[0], b.available[1]);
+        std::swap(b.made[0], b.made[1]);
+        c.slotsSwapped();
+        QCOMPARE(c.offset(), int64_t(-7));
+        QCOMPARE(c.length(), len);
+        r = c.tick(0);
+        QCOMPARE(r.frames[0].number, bb);
+        QCOMPARE(r.frames[1].number, a);
+    }
+
     void leaderIsPacedByTheFollower()
     {
         TwoBackend b;

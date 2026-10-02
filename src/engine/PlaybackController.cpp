@@ -114,6 +114,14 @@ void PlaybackController::setOffset(int64_t offset)
     requestAll();
 }
 
+void PlaybackController::slotsSwapped()
+{
+    // A frame a pairs with B frame a + off; swapped, the new A frame b pairs with b - off, and
+    // the timeline (which starts with whichever video starts first) is unchanged.
+    m_offset = -m_offset;
+    mediaChanged();
+}
+
 void PlaybackController::setSyncMode(SyncMode mode)
 {
     if (mode == m_syncMode)

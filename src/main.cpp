@@ -57,6 +57,13 @@ int main(int argc, char* argv[])
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addPositionalArgument(QStringLiteral("A"), QStringLiteral("Video to open (slot A)"), QStringLiteral("[A]"));
+    parser.addPositionalArgument(QStringLiteral("B"), QStringLiteral("Video to compare with A (slot B)"), QStringLiteral("[B]"));
+    QCommandLineOption offset(QStringLiteral("offset"), QStringLiteral("B shows frame A + N."), QStringLiteral("N"));
+    parser.addOption(offset);
+    QCommandLineOption sync(QStringLiteral("sync"), QStringLiteral("Pair frames by number (frame, default) or by time (time)."), QStringLiteral("mode"));
+    parser.addOption(sync);
+    QCommandLineOption view(QStringLiteral("view"), QStringLiteral("Comparison: split, sbs, tb, wipe, flip, diff."), QStringLiteral("mode"));
+    parser.addOption(view);
     QCommandLineOption cacheMb(QStringLiteral("cache-mb"), QStringLiteral("Decoded frame cache budget for this run (MB)."), QStringLiteral("MB"));
     parser.addOption(cacheMb);
     QCommandLineOption vramMb(QStringLiteral("vram-mb"), QStringLiteral("GPU frame cache for this run (MB, 0 disables)."), QStringLiteral("MB"));
@@ -99,6 +106,29 @@ int main(int argc, char* argv[])
     }
     window.show();
     const QStringList files = parser.positionalArguments();
+    if (files.size() >= 2)
+        window.openFile(1, files[1]);
+    if (parser.isSet(sync))
+        window.player()->setSyncMode(parser.value(sync) == QLatin1String("time") ? scvp::SyncMode::Timestamp : scvp::SyncMode::Frame);
+    if (parser.isSet(offset))
+        window.player()->setOffset(parser.value(offset).toLongLong());
+    if (parser.isSet(view)) {
+        scvp::render::CompareSettings c;
+        const QString v = parser.value(view);
+        using scvp::render::CompareMode;
+        using scvp::render::SplitOrientation;
+        if (v == QLatin1String("sbs"))
+            c.orientation = SplitOrientation::SideBySide;
+        else if (v == QLatin1String("tb"))
+            c.orientation = SplitOrientation::TopBottom;
+        else if (v == QLatin1String("wipe"))
+            c.mode = CompareMode::Wipe;
+        else if (v == QLatin1String("flip"))
+            c.mode = CompareMode::Flip;
+        else if (v == QLatin1String("diff"))
+            c.mode = CompareMode::Difference;
+        window.setCompare(c);
+    }
     if (!files.isEmpty() && window.openFile(0, files[0])) {
         if (parser.isSet(debugSeek))
             window.player()->seek(parser.value(debugSeek).toLongLong());

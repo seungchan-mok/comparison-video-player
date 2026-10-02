@@ -3,6 +3,8 @@
 #include "ui/KeyMap.h"
 #include "ui/Settings.h"
 
+#include "render/CompareLayout.h"
+
 #include <QMainWindow>
 
 namespace scvp::ui {
@@ -33,6 +35,7 @@ public:
     void overrideHardware(const HwConfig& hw);
     void overrideGpuBudget(size_t bytes);
     void reopenAll();  // after a decoding change: same files, same frame
+    void setCompare(const render::CompareSettings& c);
 
 protected:
     void dragEnterEvent(QDragEnterEvent* e) override;

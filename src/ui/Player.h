@@ -41,6 +41,14 @@ public:
     void clearLoop();
     void refresh();
 
+    // Two videos.
+    void setOffset(int64_t offset);
+    int64_t offset() const { return m_controller.offset(); }
+    void setSyncMode(SyncMode m);
+    void swapSlots();
+    // What the last presentation showed of each video (frame number, held at an end).
+    const DisplayFrame& shown(int slot) const { return m_lastTick.frames[size_t(slot)]; }
+
     // TimelineModel
     int64_t length() const override { return m_controller.length(); }
     int64_t indexedFrames() const override;
@@ -76,6 +84,7 @@ private:
     EngineBridge* m_bridge;
     FramePacer* m_pacer;
     VideoView* m_view;
+    TickResult m_lastTick;
     int64_t m_lastPosition = -1;
     bool m_lastPlaying = false;
     bool m_lastStalled = false;

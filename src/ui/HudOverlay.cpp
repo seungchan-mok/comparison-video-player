@@ -89,14 +89,19 @@ QStringList HudOverlay::lines() const
         const VideoInfo info = e.info(slot);
         const FrameIndexPtr idx = e.index(slot);
         const SlotStats st = e.stats(slot);
-        const int64_t pos = m_player->position();
-        const FramePtr f = e.frame(slot, int32_t(pos));
+        const DisplayFrame& shown = m_player->shown(slot);
+        const int64_t pos = shown.number;
+        const FramePtr f = shown.frame;
         const QString name = QFileInfo(QString::fromStdString(info.path)).fileName();
         out << QStringLiteral("%1  %2").arg(slot == 0 ? QStringLiteral("A") : QStringLiteral("B"), name);
         QString fmt = QString::fromLatin1(av_get_pix_fmt_name(f ? f->format() : info.pixelFormat));
         out << QStringLiteral("   %1 %2x%3 %4  %5 fps").arg(QString::fromStdString(info.codecName)).arg(info.width).arg(info.height).arg(fmt)
                    .arg(idx ? idx->frameRate() : info.nominalFrameRate, 0, 'f', 3);
         QString frameLine = QStringLiteral("   frame %1 / %2").arg(pos).arg(idx ? idx->frameCount() : 0);
+        if (slot == 1 && m_player->slotOpen(0))
+            frameLine += QStringLiteral(" (offset %1%2)").arg(m_player->offset() > 0 ? QStringLiteral("+") : QString()).arg(m_player->offset());
+        if (shown.hold)
+            frameLine += QStringLiteral("  HOLD");
         if (f) {
             const double t = idx ? idx->secondsOf(f->pres) : 0.0;
             frameLine += QStringLiteral("  %1 s  %2%3").arg(t, 0, 'f', 3).arg(QLatin1Char(f->pictType)).arg(f->key ? QStringLiteral(" key") : QString());
@@ -125,14 +130,53 @@ QStringList HudOverlay::lines() const
     return out;
 }
 
+// Which video each part of the view shows, and whether it is holding an end frame.
+void HudOverlay::paintPaneLabels(QPainter& p, const QFontMetrics& fm)
+{
+    auto* view = qobject_cast<const VideoView*>(parentWidget());
+    if (!view || !m_player->slotOpen(0) || !m_player->slotOpen(1))
+        return;
+    const double dpr = view->devicePixelRatioF();
+    const render::CompareLayout layout = view->layout();
+    const render::CompareSettings& c = view->compare();
+    auto label = [&](int slot) {
+        QString t = slot == 0 ? QStringLiteral("A") : QStringLiteral("B");
+        if (m_player->shown(slot).hold)
+            t += tr(" HOLD");
+        return t;
+    };
+    auto draw = [&](QPoint at, const QString& t, bool right, bool warn) {
+        const int w = fm.horizontalAdvance(t) + 10;
+        const QRect box(right ? at.x() - w : at.x(), at.y(), w, fm.height() + 4);
+        p.fillRect(box, warn ? QColor(150, 90, 0, 200) : QColor(0, 0, 0, 150));
+        p.setPen(QColor(240, 240, 240));
+        p.drawText(box, Qt::AlignCenter, t);
+    };
+    const int top = m_info ? -1 : 8;  // the info box takes the top-left corner
+    for (const render::Pane& pane : layout.panes) {
+        const QRect r(QPoint(int(pane.rect.x() / dpr), int(pane.rect.y() / dpr)),
+                      QSize(int(pane.rect.width() / dpr), int(pane.rect.height() / dpr)));
+        const int y = top < 0 ? r.bottom() - fm.height() - 12 : r.top() + top;
+        if (layout.panes.size() > 1 || c.mode == render::CompareMode::Flip) {
+            draw(QPoint(r.right() - 8, y), label(pane.slot), true, m_player->shown(pane.slot).hold);
+        } else if (c.mode == render::CompareMode::Wipe) {
+            const int x = r.left() + int(c.wipe * r.width());
+            draw(QPoint(x - 6, y), label(0), true, m_player->shown(0).hold);
+            draw(QPoint(x + 6, y), label(1), false, m_player->shown(1).hold);
+        } else {
+            const QString t = QStringLiteral("|A-B| x%1").arg(c.diffGain);
+            draw(QPoint(r.right() - 8, y), t, true, m_player->shown(0).hold || m_player->shown(1).hold);
+        }
+    }
+}
+
 void HudOverlay::paintEvent(QPaintEvent*)
 {
-    if (!m_info && !m_showStall)
-        return;
     QPainter p(this);
     const QFont mono = QFontDatabase::systemFont(QFontDatabase::FixedFont);
     p.setFont(mono);
     const QFontMetrics fm(mono);
+    paintPaneLabels(p, fm);
     if (m_info) {
         const QStringList ls = lines();
         int w = 0;

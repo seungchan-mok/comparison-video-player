@@ -3,6 +3,9 @@
 #include <QTimer>
 #include <QWidget>
 
+class QPainter;
+class QFontMetrics;
+
 namespace scvp::ui {
 
 class Player;
@@ -27,6 +30,7 @@ protected:
 private:
     QStringList lines() const;
     QString pathText(int slot) const;
+    void paintPaneLabels(QPainter& p, const QFontMetrics& fm);
 
     Player* m_player;
     QTimer m_refresh;

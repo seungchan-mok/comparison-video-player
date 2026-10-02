@@ -8,6 +8,7 @@
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
+class QSpinBox;
 class QToolButton;
 
 namespace scvp::ui {
@@ -35,6 +36,7 @@ private:
     void syncPosition();
     void syncStats();
     void applyJumps();
+    void syncOffset();
 
     Player* m_player;
     TimelineWidget* m_timeline;
@@ -44,6 +46,8 @@ private:
     QDoubleSpinBox* m_jumpLarge;
     QComboBox* m_jumpUnit;
     QComboBox* m_speed;
+    QSpinBox* m_offset;
+    QLabel* m_offsetLabel;
     QToolButton* m_loop;
     QLabel* m_loopLabel;
     QLabel* m_cache;

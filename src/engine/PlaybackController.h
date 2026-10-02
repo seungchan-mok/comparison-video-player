@@ -121,6 +121,8 @@ public:
     void setOffset(int64_t offset);
     int64_t offset() const { return m_offset; }
     void setSyncMode(SyncMode m);
+    // The backend's slots were swapped: B becomes A. Same timeline, negated offset.
+    void slotsSwapped();
     SyncMode syncMode() const { return m_syncMode; }
     TimelineMapper mapper() const;  // current mapping (lengths change while indexing)
     // True when the frame at position() is on screen: key repeat waits for this.

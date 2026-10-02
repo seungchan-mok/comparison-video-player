@@ -60,6 +60,7 @@ public:
 
     bool open(int slot, const std::string& path, const InputOptions& opts, std::string* error);
     void close(int slot);
+    void swapSlots();  // A <-> B with their caches and decoders
     bool isOpen(int slot) const;
     VideoInfo info(int slot) const;
     FrameIndexPtr index(int slot) const;
@@ -110,6 +111,7 @@ private:
     };
 
     void rebalanceLocked();
+    int slotOfLocked(uint64_t epoch) const;
     void replanLocked(Slot& s);
     void onFrames(int slot, uint64_t epoch);
     void onIndex(int slot, uint64_t epoch);
