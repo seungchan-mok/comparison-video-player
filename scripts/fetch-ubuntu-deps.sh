@@ -31,6 +31,8 @@ PKGS=(
   libpthread-stubs0-dev x11proto-core-dev x11proto-dev xtrans-dev
   # FFmpeg development files (headers + .so links; runtime libs come from the system)
   libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
+  # Virtual X server for invisible GUI tests (scripts/xvfb-run.sh)
+  xvfb
 )
 
 installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"; }
