@@ -223,6 +223,13 @@ void MainWindow::createMenus()
     openA->setShortcut(QKeySequence::Open);
     QAction* openB = file->addAction(tr("Open &B (compare)..."), this, [this] { openDialog(1); });
     openB->setShortcut(QKeySequence(Qt::ControlModifier | Qt::ShiftModifier | Qt::Key_O));
+    file->addAction(tr("Open image sequence folder..."), this, [this] {
+        const QString dir = QFileDialog::getExistingDirectory(this, tr("Image sequence folder"), m_settings.lastDir);
+        if (!dir.isEmpty()) {
+            m_settings.lastDir = dir;
+            openFile(m_player->slotOpen(0) ? 1 : 0, dir);
+        }
+    });
     file->addAction(tr("Open raw video as A..."), this, [this] { openDialog(0, true); });
     file->addAction(tr("Open raw video as B..."), this, [this] { openDialog(1, true); });
     file->addSeparator();

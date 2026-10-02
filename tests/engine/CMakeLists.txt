@@ -9,6 +9,7 @@ scvp_add_test(tst_engine tst_engine.cpp
     FUNCTIONS showsRequestedFrame sequentialPlayback backwardStepping randomJumps
               shrinkingBudgetReleasesMemory twoVideosShareTheBudget gpuTier jumpTargetStaysOnGpu closeWhileDecoding)
 scvp_add_test(tst_rawvideo tst_rawvideo.cpp)
+scvp_add_test(tst_imagesequence tst_imagesequence.cpp)
 scvp_add_test(tst_timelinemapper tst_timelinemapper.cpp)
 scvp_add_test(tst_playbackcontroller tst_playbackcontroller.cpp)
 scvp_add_test(tst_hwdecode tst_hwdecode.cpp FUNCTIONS sequential randomAccess fallbackToSoftware)

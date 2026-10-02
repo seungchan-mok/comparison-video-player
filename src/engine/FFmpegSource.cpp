@@ -1,5 +1,6 @@
 #include "engine/FFmpegSource.h"
 
+#include "engine/ImageSequenceSource.h"
 #include "engine/RawVideoSource.h"
 
 #include "engine/GpuFrame.h"
@@ -692,6 +693,8 @@ std::unique_ptr<IVideoSource> openVideoSource(const std::string& path, const Inp
 {
     if (opts.raw)
         return RawVideoSource::open(path, *opts.raw, error);
+    if (isDirectory(path) || isImageExtension(path))
+        return ImageSequenceSource::open(path, opts.frameRate, error);
     if (isRawVideoExtension(path)) {
         const RawVideoParams p = parseRawVideoName(path);
         if (p.valid())
