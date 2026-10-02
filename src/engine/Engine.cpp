@@ -230,7 +230,10 @@ void Engine::rebalanceLocked()
         s->cacheBudget = std::max(fb, share - reserve);
         const size_t gpuTotal = gpuBudgetTotal;
         s->gpuBudget = size_t(double(gpuTotal) * double(fb) / double(total));
-        s->capacity = int32_t(std::max<size_t>(1, s->cacheBudget / fb + (s->onGpu ? s->gpuBudget / fb : 0)));
+        // 1 % headroom: frames of slightly different sizes (VFR resolution changes, tier moves)
+        // must not push a full plan over what the cache can hold.
+        const size_t frames = s->cacheBudget / fb + (s->onGpu ? s->gpuBudget / fb : 0);
+        s->capacity = int32_t(std::max<size_t>(1, frames - std::min(frames - 1, std::max<size_t>(1, frames / 100))));
         s->frameBytesPlanned = fb;
         s->cache->setBudget(s->cacheBudget);
         s->cache->setGpuBudget(s->gpuBudget);
@@ -389,7 +392,9 @@ void Engine::onFrames(int, uint64_t epoch)
         if (onGpu != s->onGpu) {
             s->onGpu = onGpu;
             rebalanceLocked();
-        } else if (fb && (fb > s->frameBytesPlanned * 9 / 8 || fb < s->frameBytesPlanned * 7 / 8)) {
+        } else if (fb && fb != s->frameBytesPlanned) {
+            // Plan with the real frame size: a capacity from the estimate that is a few frames
+            // too large makes a full plan never fit, and the lane refills evicted frames forever.
             rebalanceLocked();
         }
         cb = m_framesCb;
