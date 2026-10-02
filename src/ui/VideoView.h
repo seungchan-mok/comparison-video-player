@@ -22,6 +22,8 @@ public:
     void setCompare(const render::CompareSettings& c);
     void setOverlay(const render::PixelOverlaySettings& o);
     void setColorOverrides(int slot, const render::ColorOverrides& o);
+    void setSmoothScaling(bool on);
+    bool smoothScaling() const { return m_state.smoothScaling; }
     const render::ColorOverrides& colorOverrides(int slot) const { return m_state.color[size_t(slot)]; }
     render::ColorParams colorParams(int slot) const { return m_renderer.colorParams(slot); }
     const render::PixelOverlaySettings& overlay() const { return m_state.overlay; }

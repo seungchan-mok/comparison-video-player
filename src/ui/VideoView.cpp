@@ -80,6 +80,12 @@ void VideoView::updateGeometry()
     m_state.view.setViewportSize(QSizeF(layout().paneSize()));
 }
 
+void VideoView::setSmoothScaling(bool on)
+{
+    m_state.smoothScaling = on;
+    update();
+}
+
 void VideoView::setColorOverrides(int slot, const render::ColorOverrides& o)
 {
     m_state.color[size_t(slot)] = o;

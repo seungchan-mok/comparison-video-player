@@ -188,6 +188,9 @@ void Renderer::drawPane(int mode, const Slot& a, const Slot& b, const RenderStat
     gl->glUniform1i(loc("field"), geom.field);
     gl->glUniform2f(loc("glyph"), float(geom.glyphW), float(geom.glyphH));
     gl->glUniform1f(loc("rowH"), float(geom.rowH));
+    const bool fractional = std::abs(scale - std::round(scale)) > 1e-9;
+    const bool smooth = state.smoothScaling && magnified && fractional && scale < kGridMinLogicalPx * dpr;
+    gl->glUniform1i(loc("smoothMag"), smooth ? 1 : 0);
     const bool outline = state.probe && magnified && scale >= 4.0 * dpr;
     gl->glUniform2f(loc("cursor"), outline ? float(std::floor(state.probePos.x())) : -1.0f,
                     outline ? float(std::floor(state.probePos.y())) : -1.0f);

@@ -153,6 +153,11 @@ void MainWindow::handleAction(Action a, bool)
     case Action::ViewDifference:
     case Action::DiffGainUp:
     case Action::DiffGainDown: setCompare(nextCompare(m_view->compare(), a, m_view->layout().orientation)); break;
+    case Action::SmoothScaling:
+        m_settings.smoothScaling = !m_settings.smoothScaling;
+        m_view->setSmoothScaling(m_settings.smoothScaling);
+        syncViewActions();
+        break;
     case Action::PixelValues: {
         render::PixelOverlaySettings o = m_view->overlay();
         o.values = !o.values;
@@ -303,6 +308,10 @@ void MainWindow::createMenus()
     for (Action a : {Action::ZoomFit, Action::ZoomOneToOne, Action::ZoomIn, Action::ZoomOut})
         playerAction(view, a);
     view->addSeparator();
+    m_smoothAction = playerAction(view, Action::SmoothScaling);
+    m_smoothAction->setCheckable(true);
+    m_smoothAction->setToolTip(tr("Off: exact pixels at every zoom, also when fitted to the window"));
+    view->addSeparator();
     for (Action a : {Action::PixelValues, Action::PixelValueMode})
         playerAction(view, a);
     view->addSeparator();
@@ -370,6 +379,12 @@ void MainWindow::createColorMenu()
     });
 }
 
+void MainWindow::syncViewActions()
+{
+    if (m_smoothAction)
+        m_smoothAction->setChecked(m_settings.smoothScaling);
+}
+
 void MainWindow::applySettings(const AppSettings& s)
 {
     const bool hwChanged = s.hwdec != m_settings.hwdec;
@@ -380,6 +395,8 @@ void MainWindow::applySettings(const AppSettings& s)
     m_player->engine().setMemoryBudget(s.cacheBytes());
     if (s.vramMb)
         m_player->engine().setGpuMemoryBudget(s.vramBytes());
+    m_view->setSmoothScaling(s.smoothScaling);
+    syncViewActions();
     m_player->setJumpSettings(s.jumps);
     m_controls->setJumpSettings(s.jumps);
     m_keys->setKeyMap(s.keys);

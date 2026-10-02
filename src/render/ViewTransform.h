@@ -8,9 +8,10 @@ namespace scvp::render {
 // Image -> device-pixel mapping of a viewport:  device = scale * image + translation, both with
 // a top-left origin and y pointing down. All values are device pixels (physical, HiDPI aware).
 //
-// Zoom snaps to a ladder: integers at and above 1:1 (so pixels stay square blocks) and quarter
-// octaves below. Fit picks the largest scale that shows the whole image, rounded down to an
-// integer when it is 1 or more. The translation is kept exact; rendering uses
+// Zoom steps follow a ladder: integers at and above 1:1 (so pixels stay square blocks) and
+// quarter octaves below. Fit uses exactly the largest scale that shows the whole image, so the
+// image fills the viewport in one direction (the renderer smooths such fractional zooms); the
+// next zoom step lands on the ladder again. The translation is kept exact; rendering uses
 // renderTranslation(), rounded to whole device pixels so pixel edges line up.
 class ViewTransform {
 public:

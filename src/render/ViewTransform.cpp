@@ -45,9 +45,8 @@ double ViewTransform::fitScale(QSizeF image, QSizeF viewport)
 {
     if (image.width() <= 0 || image.height() <= 0 || viewport.width() <= 0 || viewport.height() <= 0)
         return 1.0;
-    double s = std::min(viewport.width() / image.width(), viewport.height() / image.height());
-    if (s >= 1.0)
-        s = std::floor(s);  // whole multiples keep pixels exact
+    // Exact, not snapped to the ladder: fit means filling the window.
+    const double s = std::min(viewport.width() / image.width(), viewport.height() / image.height());
     return std::clamp(s, kMinScale, kMaxScale);
 }
 

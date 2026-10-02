@@ -44,6 +44,7 @@ enum class Action {
     InfoOverlay,
     Fullscreen,
     ExitFullscreen,
+    SmoothScaling,
     Count
 };
 

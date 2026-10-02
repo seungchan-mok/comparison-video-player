@@ -40,6 +40,7 @@ const std::array<ActionInfo, size_t(Action::Count)> kInfo = {{
     {"info_overlay", "Info overlay", Repeat::None},
     {"fullscreen", "Fullscreen", Repeat::None},
     {"exit_fullscreen", "Exit fullscreen", Repeat::None},
+    {"smooth_scaling", "Smooth fractional zoom", Repeat::None},
 }};
 
 bool isSymbolKey(int key)
@@ -102,6 +103,7 @@ KeyMap KeyMap::defaults()
     set(Action::PixelValues, {QKeyCombination(none, Qt::Key_P)});
     set(Action::PixelValueMode, {QKeyCombination(none, Qt::Key_Y)});
     set(Action::InfoOverlay, {QKeyCombination(none, Qt::Key_I)});
+    set(Action::SmoothScaling, {QKeyCombination(none, Qt::Key_N)});  // N: nearest (sharp) <-> smooth
 #if defined(Q_OS_MACOS)
     // Ctrl+Cmd+F (Qt: Meta = Ctrl key, Control = Cmd key); F11 is Show Desktop on macOS.
     set(Action::Fullscreen, {QKeyCombination(none, Qt::Key_F), QKeyCombination(Qt::MetaModifier | ctrl, Qt::Key_F)});

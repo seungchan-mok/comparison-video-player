@@ -30,6 +30,9 @@ struct RenderState {
     CompareSettings compare;
     PixelOverlaySettings overlay;
     double devicePixelRatio = 1.0;   // for size thresholds given in logical px
+    // Bilinear filtering at fractional magnifications (fit to window) below the pixel-grid size;
+    // integer zooms and large magnifications always show exact pixels.
+    bool smoothScaling = true;
     // Pixel under the cursor (view image coordinates): outlined in every pane and read back.
     bool probe = false;
     QPointF probePos;

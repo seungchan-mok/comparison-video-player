@@ -36,6 +36,7 @@ uniform int field;       // glyphs per row
 uniform vec2 glyph;      // glyph width, height (cell units)
 uniform float rowH;
 uniform float gridAlpha; // 0: no grid
+uniform int smoothMag;   // 1: bilinear between texels (fractional magnification, e.g. fit)
 uniform vec2 cursor;     // view pixel outlined (linked cursor), negative: none
 
 out vec4 o;
@@ -45,6 +46,17 @@ vec3 fetch(sampler2D img, vec2 size, vec2 k, vec2 x)
     vec2 t = x * k;
     if (lod > 0.0)
         return textureLod(img, t / size, lod + log2(max(k.x, k.y))).rgb;
+    if (smoothMag != 0) {
+        // The RGB textures sample NEAREST (exact pixels); interpolate by hand here.
+        vec2 c = t - 0.5;
+        vec2 f = c - floor(c);
+        ivec2 hi = ivec2(size) - 1;
+        ivec2 a = clamp(ivec2(floor(c)), ivec2(0), hi);
+        ivec2 b = clamp(ivec2(floor(c)) + 1, ivec2(0), hi);
+        vec3 top = mix(texelFetch(img, a, 0).rgb, texelFetch(img, ivec2(b.x, a.y), 0).rgb, f.x);
+        vec3 bottom = mix(texelFetch(img, ivec2(a.x, b.y), 0).rgb, texelFetch(img, b, 0).rgb, f.x);
+        return mix(top, bottom, f.y);
+    }
     return texelFetch(img, ivec2(min(floor(t), size - 1.0)), 0).rgb;
 }
 

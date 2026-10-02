@@ -10,14 +10,21 @@ class TstViewTransform : public QObject {
     Q_OBJECT
 
 private slots:
-    void fitUsesWholeMultiples()
+    void fitFillsTheViewport()
     {
         ViewTransform v;
         v.setViewportSize({1000, 800});
         v.setImageSize({320, 240});
         QVERIFY(v.isFit());
+        QCOMPARE(v.scale(), 1000.0 / 320.0);  // exact, not rounded down to 3x
+        QCOMPARE(v.translation(), QPointF(0, 25));
+        // The next zoom step lands on the integer ladder again.
+        v.zoomSteps(1, {500, 400});
+        QCOMPARE(v.scale(), 4.0);
+        v.fit();
+        v.zoomSteps(-1, {500, 400});
         QCOMPARE(v.scale(), 3.0);
-        QCOMPARE(v.translation(), QPointF(20, 40));
+        v.fit();
         v.setViewportSize({1280, 720});
         v.setImageSize({1920, 1080});
         QCOMPARE(v.scale(), 1280.0 / 1920.0);
@@ -104,7 +111,8 @@ private slots:
         v.setImageSize({320, 240});
         QCOMPARE(v.scale(), 2.0);
         v.setViewportSize({1000, 1000});
-        QCOMPARE(v.scale(), 3.0);
+        QCOMPARE(v.scale(), 1000.0 / 320.0);
+        QCOMPARE(v.translation(), QPointF(0, 125));
     }
 
     void devicePixelRatioChange()

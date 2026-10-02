@@ -17,6 +17,7 @@ struct AppSettings {
     size_t vramMb = 0;   // 0 = automatic (40 % of the CUDA device's memory)
     QString hwdec = QStringLiteral("gpu");  // "gpu" (GPU first), "cpu", or a device name ("cuda", ...)
     JumpSettings jumps;
+    bool smoothScaling = true;  // bilinear at fractional zooms such as fit to window
     KeyMap keys = KeyMap::defaults();
     QString lastDir;
     QByteArray geometry;

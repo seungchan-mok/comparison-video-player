@@ -53,6 +53,7 @@ private:
     void createMenus();
     QAction* playerAction(QMenu* menu, Action a);
     void createColorMenu();
+    void syncViewActions();
 
     VideoView* m_view;
     Player* m_player;
@@ -63,6 +64,7 @@ private:
     AppSettings m_settings;
     std::optional<RawVideoParams> m_rawOverride;
     QList<QPair<QAction*, Action>> m_menuActions;
+    QAction* m_smoothAction = nullptr;
 };
 
 } // namespace scvp::ui

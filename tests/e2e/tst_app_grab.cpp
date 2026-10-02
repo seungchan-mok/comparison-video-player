@@ -65,41 +65,47 @@ private slots:
         SCVP_REQUIRE_FIXTURES();
         const auto fx = test::fixture(QStringLiteral("h264_b"));
         QString log;
-        const QImage img = grab({fx->path}, {QStringLiteral("--debug-seek"), QStringLiteral("100"), QStringLiteral("--debug-after"),
-                                           QStringLiteral("1500")},
+        // Smooth scaling off (N): at the fractional fit zoom every screen pixel shows exactly one
+        // source pixel.
+        const QImage img = grab({fx->path}, {QStringLiteral("--debug-seek"), QStringLiteral("100"), QStringLiteral("--debug-actions"),
+                                           QStringLiteral("smooth_scaling"), QStringLiteral("--debug-after"), QStringLiteral("1500")},
                                 &log);
         if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
             QSKIP("Xvfb not available");
         QVERIFY2(!img.isNull(), qPrintable(log));
         QVERIFY2(log.contains(QLatin1String("(frame 100)")), qPrintable(log));
 
-        // Same fit the view computes for its size; every source pixel is an s x s block.
+        // Same fit the view computes for its size: the image fills the view in one direction.
         render::ViewTransform vt;
         vt.setViewportSize(QSizeF(img.size()));
         vt.setImageSize(QSizeF(320, 240));
-        const int s = int(vt.scale());
-        QVERIFY2(s >= 1 && double(s) == vt.scale(), qPrintable(QString::number(vt.scale())));
-        const QPoint t = vt.renderTranslation().toPoint();
+        QCOMPARE(vt.scale(), std::min(img.width() / 320.0, img.height() / 240.0));
+        const QPointF t = vt.renderTranslation();
+        QVERIFY(t.x() == 0 || t.y() == 0);
         FramePtr f = decodeFrame(fx->path, 100);
         QVERIFY(f);
         const auto layout = *render::PixelLayout::of(f->format());
         const auto color = render::ColorParams::resolve(layout, f->av->colorspace, f->av->color_range, f->height());
-        int off = 0;
-        int worst = 0;
-        for (int y = 0; y < 240; ++y)
-            for (int x = 0; x < 320; ++x) {
-                const auto k = render::readCodes(f->av, layout, x, y);
+        const QPointF end = vt.imageToDevice(QPointF(320, 240));
+        int off = 0, worst = 0, checked = 0;
+        for (int y = int(t.y()); y < int(end.y()); ++y)
+            for (int x = int(t.x()); x < int(end.x()); ++x) {
+                const QPointF i = vt.deviceToImage(QPointF(x, y));
+                // GPU and CPU float math may disagree right on a pixel boundary: skip those.
+                const double fx_ = i.x() - std::floor(i.x()), fy_ = i.y() - std::floor(i.y());
+                if (fx_ < 1e-3 || fx_ > 1 - 1e-3 || fy_ < 1e-3 || fy_ > 1 - 1e-3 || i.x() >= 320 || i.y() >= 240)
+                    continue;
+                const auto k = render::readCodes(f->av, layout, int(i.x()), int(i.y()));
                 const auto ref = color.toRgb(k[0], k[1], k[2]);
-                for (int dy = 0; dy < s; ++dy)
-                    for (int dx = 0; dx < s; ++dx) {
-                        const QColor c = img.pixelColor(t.x() + s * x + dx, t.y() + s * y + dy);
-                        const int d = std::max({std::abs(c.red() - ref[0]), std::abs(c.green() - ref[1]), std::abs(c.blue() - ref[2])});
-                        worst = std::max(worst, d);
-                        off += d ? 1 : 0;
-                    }
+                const QColor c = img.pixelColor(x, y);
+                const int d = std::max({std::abs(c.red() - ref[0]), std::abs(c.green() - ref[1]), std::abs(c.blue() - ref[2])});
+                worst = std::max(worst, d);
+                off += d ? 1 : 0;
+                ++checked;
             }
+        QVERIFY(checked > 320 * 240);
         QVERIFY2(worst <= 1, qPrintable(QString::number(worst)));
-        QVERIFY(off <= 320 * 240 * s * s / 1000);
+        QVERIFY(off <= checked / 1000);
     }
 
     void playbackAdvances()
