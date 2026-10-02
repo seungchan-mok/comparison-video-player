@@ -35,6 +35,7 @@ struct SlotStats {
     uint64_t framesDecoded = 0;
     uint64_t seeks = 0;
     uint64_t cancellations = 0;
+    std::string hardwareDevice;  // "" = software decoding
     double indexProgress = 0;
     bool indexComplete = false;
 };
@@ -61,6 +62,9 @@ public:
 
     void setMemoryBudget(size_t bytes);
     size_t memoryBudget() const;
+    // Hardware decoding for videos opened from now on (default: GPU first).
+    void setHardware(const HwConfig& hw);
+    HwConfig hardware() const;
 
     void request(int slot, const PlaybackIntent& intent);
 
@@ -105,6 +109,7 @@ private:
     std::array<std::unique_ptr<Slot>, kSlots> m_slots;
     uint64_t m_nextEpoch = 1;
     size_t m_budget;
+    HwConfig m_hw;
     std::function<void(int)> m_framesCb;
     std::function<void(int)> m_indexCb;
 };

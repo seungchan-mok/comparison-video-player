@@ -10,6 +10,7 @@ add_library(scvp_engine STATIC
     Engine.h Engine.cpp
     FFmpegSource.h FFmpegSource.cpp
     FrameIndex.h FrameIndex.cpp
+    HwDevice.h HwDevice.cpp
     IndexScanner.h IndexScanner.cpp
     Log.h Log.cpp
     Mailbox.h

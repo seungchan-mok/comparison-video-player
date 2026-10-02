@@ -4,6 +4,7 @@
 #include "engine/Frame.h"
 #include "engine/FrameAllocator.h"
 #include "engine/FrameIndex.h"
+#include "engine/HwDevice.h"
 
 #include <atomic>
 #include <cstdint>
@@ -42,6 +43,7 @@ struct SourceCaps {
 struct SessionConfig {
     std::shared_ptr<FramePool> pool;  // frame buffers; required
     int threads = 0;                  // decoder threads, 0 = automatic
+    HwConfig hw;
 };
 
 struct DecodeHints {
@@ -80,6 +82,8 @@ public:
     virtual bool wasSkipped(int32_t dec) const = 0;
     // Frames whose number contradicted the index since the session was opened.
     virtual int indexMismatches() const = 0;
+    // The hardware device decoding right now ("cuda", ...), or "" for software.
+    virtual std::string hardwareDevice() const = 0;
 };
 
 class IVideoSource {

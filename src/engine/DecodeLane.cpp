@@ -184,6 +184,10 @@ void DecodeLane::exec(const Task& t, const FrameIndex& idx, uint64_t generation)
         }
         m_stats.framesDecoded.fetch_add(1, std::memory_order_relaxed);
         m_frameBytes.store(f->bytes, std::memory_order_relaxed);
+        if (m_stats.framesDecoded.load(std::memory_order_relaxed) % 64 == 1) {
+            std::lock_guard<std::mutex> lock(m_describeMutex);
+            m_hwDevice = m_session->hardwareDevice();
+        }
         const int32_t pres = f->pres;
         if (pres > t.first && !gotFirst) {
             // The decoder went past the frame without producing it. After a fresh seek that
@@ -210,6 +214,12 @@ std::string DecodeLane::describe() const
 {
     std::lock_guard<std::mutex> lock(m_describeMutex);
     return m_description;
+}
+
+std::string DecodeLane::hardwareDevice() const
+{
+    std::lock_guard<std::mutex> lock(m_describeMutex);
+    return m_hwDevice;
 }
 
 void DecodeLane::run()

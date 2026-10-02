@@ -44,6 +44,7 @@ public:
     size_t frameBytes() const { return m_frameBytes.load(std::memory_order_relaxed); }
     // Human-readable state (current task, decoder position) for stall diagnostics.
     std::string describe() const;
+    std::string hardwareDevice() const;
 
 private:
     struct Task {
@@ -79,6 +80,7 @@ private:
     FrameIndexPtr m_unreachableFor;
     mutable std::mutex m_describeMutex;
     std::string m_description;
+    std::string m_hwDevice;
 };
 
 } // namespace scvp

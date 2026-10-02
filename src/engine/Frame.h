@@ -23,6 +23,7 @@ struct Frame {
     char pictType = '?';            // 'I', 'P', 'B', ... from the decoder
     bool key = false;
     bool provisional = false;       // decoded before the index was final; number is an estimate
+    bool hardware = false;          // decoded by a hardware decoder (then downloaded)
 
     Frame() = default;
     ~Frame() { av_frame_free(&av); }

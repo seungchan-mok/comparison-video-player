@@ -40,7 +40,7 @@ FramePtr decodeFrame(const QString& path, int32_t n)
     if (!src || !src->waitForIndex(20000))
         return nullptr;
     auto pool = std::make_shared<FramePool>();
-    auto s = src->openSession(SessionConfig{pool, 0}, &err);
+    auto s = src->openSession(SessionConfig{pool, 0, HwConfig{HwPolicy::Off}}, &err);
     FrameIndexPtr idx = src->index();
     s->seekTo(idx->seekPointFor(n));
     for (;;) {

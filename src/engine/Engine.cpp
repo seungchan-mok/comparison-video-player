@@ -71,12 +71,14 @@ bool Engine::open(int slot, const std::string& path, const InputOptions& opts, s
     s->frameBytesEstimate = estimateFrameBytes(s->info);
 
     uint64_t epoch;
+    HwConfig hw;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         epoch = m_nextEpoch++;
         s->epoch = epoch;
+        hw = m_hw;
     }
-    s->lane = std::make_unique<DecodeLane>(*s->source, *s->cache, *s->mailbox, SessionConfig{s->pool, 0},
+    s->lane = std::make_unique<DecodeLane>(*s->source, *s->cache, *s->mailbox, SessionConfig{s->pool, 0, hw},
                                            [this, slot, epoch] { onFrames(slot, epoch); });
     if (!s->lane->start(error))
         return false;
@@ -139,6 +141,18 @@ size_t Engine::memoryBudget() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_budget;
+}
+
+void Engine::setHardware(const HwConfig& hw)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_hw = hw;
+}
+
+HwConfig Engine::hardware() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_hw;
 }
 
 size_t Engine::frameBytesOf(const Slot& s) const
@@ -270,6 +284,7 @@ SlotStats Engine::stats(int slot) const
     st.framesDecoded = s->lane->stats().framesDecoded.load();
     st.seeks = s->lane->stats().seeks.load();
     st.cancellations = s->lane->stats().cancellations.load();
+    st.hardwareDevice = s->lane->hardwareDevice();
     st.indexProgress = s->source->indexProgress();
     st.indexComplete = s->source->indexComplete();
     return st;

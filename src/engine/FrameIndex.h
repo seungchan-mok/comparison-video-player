@@ -64,6 +64,8 @@ public:
     double secondsOf(int32_t pres) const;          // relative to frame 0
     int32_t presAtSeconds(double seconds) const;   // last frame shown at or before `seconds`
     int32_t estimatePres(int64_t pts) const;       // provisional number for an unindexed pts
+    // The frame shown at exactly `pts`, searching near `hint` first; -1 if none.
+    int32_t presForPts(int64_t pts, int32_t hint = -1) const;
 
     SeekPoint seekPointFor(int32_t pres) const;
     SeekPoint seekPointBefore(const SeekPoint& sp) const;  // previous usable key (retries)

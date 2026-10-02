@@ -1,9 +1,11 @@
 #include "engine/FFmpegSource.h"
 
+#include "engine/HwDevice.h"
 #include "engine/Log.h"
 
 #include <algorithm>
 #include <chrono>
+#include <atomic>
 #include <set>
 #include <thread>
 
@@ -42,40 +44,141 @@ public:
             return false;
         m_demux = std::move(*demux);
         m_byteSeek = prefersByteSeek(m_demux.fmt.get());
+        if (!openCodec(m_cfg.hw.policy != HwPolicy::Off, error))
+            return false;
+        m_pkt = ff::makePacket();
+        m_frame = ff::makeFrame();
+        return true;
+    }
+
+    // Opens the decoder, with a hardware device when the policy allows and the codec and device
+    // support it; otherwise in software.
+    bool openCodec(bool tryHardware, std::string* error)
+    {
         const AVStream* st = m_demux.videoStream();
-        const AVCodec* codec = chooseDecoder(st->codecpar->codec_id, false);
+        const AVCodecID id = st->codecpar->codec_id;
+        m_hwType = AV_HWDEVICE_TYPE_NONE;
+        m_hwPixFmt = AV_PIX_FMT_NONE;
+        m_hwFailed = false;
+        m_hwErrors = 0;
+        const AVCodec* codec = nullptr;
+        AVBufferRef* device = nullptr;
+        if (tryHardware && m_cfg.hw.policy == HwPolicy::GpuFirst && !HwDevices::bitExactCodec(id))
+            tryHardware = false;
+        if (tryHardware) {
+            std::vector<AVHWDeviceType> types;
+            if (m_cfg.hw.policy == HwPolicy::Device)
+                types.push_back(m_cfg.hw.device);
+            else
+                types = HwDevices::platformOrder();
+            for (AVHWDeviceType t : types) {
+                const AVCodec* c = chooseDecoder(id, true);
+                const AVPixelFormat hwFmt = c ? hardwareFormat(c, t) : AV_PIX_FMT_NONE;
+                if (hwFmt == AV_PIX_FMT_NONE)
+                    continue;
+                device = HwDevices::instance().get(t);
+                if (!device)
+                    continue;
+                codec = c;
+                m_hwType = t;
+                m_hwPixFmt = hwFmt;
+                break;
+            }
+        }
+        if (!codec)
+            codec = chooseDecoder(id, false);
         if (!codec) {
             if (error)
-                *error = std::string("no decoder for ") + avcodec_get_name(st->codecpar->codec_id);
+                *error = std::string("no decoder for ") + avcodec_get_name(id);
             return false;
         }
         m_ctx.reset(avcodec_alloc_context3(codec));
         if (!m_ctx || avcodec_parameters_to_context(m_ctx.get(), st->codecpar) < 0) {
+            av_buffer_unref(&device);
             if (error)
                 *error = "cannot configure decoder";
             return false;
         }
         m_ctx->pkt_timebase = st->time_base;
         m_ctx->flags |= AV_CODEC_FLAG_COPY_OPAQUE;
-        m_ctx->thread_count = m_cfg.threads > 0 ? m_cfg.threads : autoDecoderThreads(st->codecpar->width, st->codecpar->height);
         m_ctx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
         m_ctx->opaque = this;
         if (m_cfg.pool)
             m_ctx->get_buffer2 = &FFmpegDecodeSession::getBuffer2;
+        if (m_hwType != AV_HWDEVICE_TYPE_NONE) {
+            m_ctx->hw_device_ctx = device;  // takes the reference
+            m_ctx->get_format = &FFmpegDecodeSession::getFormat;
+            m_ctx->extra_hw_frames = 4;
+            m_ctx->hwaccel_flags |= AV_HWACCEL_FLAG_IGNORE_LEVEL;
+            m_ctx->thread_count = 2;  // measured best with NVDEC; more only adds surfaces in flight
+        } else {
+            m_ctx->thread_count = m_cfg.threads > 0 ? m_cfg.threads : autoDecoderThreads(st->codecpar->width, st->codecpar->height);
+        }
         const int err = avcodec_open2(m_ctx.get(), codec, nullptr);
         if (err < 0) {
+            if (m_hwType != AV_HWDEVICE_TYPE_NONE) {
+                SCVP_INFO("%s: hardware decoder open failed (%s), using software", m_path.c_str(), ff::errorString(err).c_str());
+                return openCodec(false, error);
+            }
             if (error)
                 *error = "avcodec_open2: " + ff::errorString(err);
             return false;
         }
-        m_pkt = ff::makePacket();
-        m_frame = ff::makeFrame();
         return true;
+    }
+
+    static AVPixelFormat hardwareFormat(const AVCodec* codec, AVHWDeviceType type)
+    {
+        for (int i = 0;; ++i) {
+            const AVCodecHWConfig* cfg = avcodec_get_hw_config(codec, i);
+            if (!cfg)
+                return AV_PIX_FMT_NONE;
+            if ((cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) && cfg->device_type == type)
+                return cfg->pix_fmt;
+        }
+    }
+
+    // Offered the hardware format (device initialised for this stream): take it. Called again
+    // without it when hardware initialisation failed: note the failure; next() then reopens the
+    // decoder in software (the native AV1 decoder, for one, outputs nothing without hardware).
+    static AVPixelFormat getFormat(AVCodecContext* ctx, const AVPixelFormat* fmts)
+    {
+        auto* self = static_cast<FFmpegDecodeSession*>(ctx->opaque);
+        for (const AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; ++p)
+            if (*p == self->m_hwPixFmt && !self->m_cfg.hw.simulateFailure)
+                return *p;
+        self->m_hwFailed = true;
+        for (const AVPixelFormat* p = fmts; *p != AV_PIX_FMT_NONE; ++p) {
+            const AVPixFmtDescriptor* d = av_pix_fmt_desc_get(*p);
+            if (d && !(d->flags & AV_PIX_FMT_FLAG_HWACCEL))
+                return *p;
+        }
+        return AV_PIX_FMT_NONE;
+    }
+
+    // Reopens the decoder in software and restarts from the last seek point.
+    bool fallBackToSoftware()
+    {
+        SCVP_WARN("%s: hardware decoding (%s) failed, switching to software", m_path.c_str(), HwDevices::name(m_hwType));
+        std::string err;
+        m_ctx.reset();
+        if (!openCodec(false, &err)) {
+            SCVP_ERROR("%s: %s", m_path.c_str(), err.c_str());
+            return false;
+        }
+        const SeekPoint sp = m_lastSeek;
+        return seekTo(sp) == DecodeStatus::Ok;
+    }
+
+    std::string hardwareDevice() const override
+    {
+        return m_hwType != AV_HWDEVICE_TYPE_NONE && !m_hwFailed ? HwDevices::name(m_hwType) : std::string();
     }
 
     DecodeStatus seekTo(const SeekPoint& sp) override
     {
         resetDecoder();
+        m_lastSeek = sp;
         if (!sp.valid())
             return rewindToStart() ? DecodeStatus::Ok : DecodeStatus::Error;
 
@@ -104,8 +207,17 @@ public:
         for (;;) {
             if (hints.cancelled())
                 return DecodeStatus::Cancelled;
+            if (m_hwFailed && m_hwType != AV_HWDEVICE_TYPE_NONE && !fallBackToSoftware())
+                return DecodeStatus::Error;
             int ret = avcodec_receive_frame(m_ctx.get(), m_frame.get());
             if (ret == 0) {
+                if (m_frame->format == m_hwPixFmt && m_hwPixFmt != AV_PIX_FMT_NONE && !download()) {
+                    av_frame_unref(m_frame.get());
+                    if (++m_hwErrors >= 3)
+                        m_hwFailed = true;
+                    continue;
+                }
+                m_hwErrors = 0;
                 FramePtr f = labelFrame();
                 if (!f)
                     continue;  // a frame that is never shown
@@ -118,10 +230,19 @@ public:
             }
             if (ret != AVERROR(EAGAIN)) {
                 SCVP_WARN("%s: decode error %s", m_path.c_str(), ff::errorString(ret).c_str());
+                if (m_hwType != AV_HWDEVICE_TYPE_NONE && m_hwFailed)
+                    continue;
+                if (m_hwType != AV_HWDEVICE_TYPE_NONE && !m_hwFailed && ++m_hwErrors >= 3) {
+                    m_hwFailed = true;  // persistent hardware errors: retry in software
+                    continue;
+                }
                 return DecodeStatus::Error;
             }
-            if (!feedOne(hints))
+            if (!feedOne(hints)) {
+                if (m_hwFailed && m_hwType != AV_HWDEVICE_TYPE_NONE)
+                    continue;  // the decoder rejects input once its hardware is gone: fall back
                 return DecodeStatus::Error;
+            }
         }
     }
 
@@ -292,13 +413,53 @@ private:
         return unneeded ? AVDISCARD_NONREF : AVDISCARD_DEFAULT;
     }
 
+    // Copies a hardware surface into a pool frame in system memory (NV12/P010/...), so the
+    // surface goes straight back to the decoder's fixed-size pool.
+    bool download()
+    {
+        const auto* frames = reinterpret_cast<const AVHWFramesContext*>(m_frame->hw_frames_ctx->data);
+        AVFrame* sw = m_cfg.pool ? m_cfg.pool->allocFrame(frames->sw_format, m_frame->width, m_frame->height) : av_frame_alloc();
+        if (!sw)
+            return false;
+        if (!m_cfg.pool)
+            sw->format = frames->sw_format;
+        int err = av_hwframe_transfer_data(sw, m_frame.get(), 0);
+        if (err >= 0)
+            err = av_frame_copy_props(sw, m_frame.get());
+        if (err < 0) {
+            SCVP_WARN("%s: hardware frame download failed: %s", m_path.c_str(), ff::errorString(err).c_str());
+            av_frame_free(&sw);
+            return false;
+        }
+        if (sw->crop_top || sw->crop_left)
+            av_frame_apply_cropping(sw, AV_FRAME_CROP_UNALIGNED);
+        av_frame_unref(m_frame.get());
+        av_frame_move_ref(m_frame.get(), sw);
+        av_frame_free(&sw);
+        m_downloaded = true;
+        return true;
+    }
+
     FramePtr labelFrame()
     {
         const intptr_t tag = reinterpret_cast<intptr_t>(m_frame->opaque);
-        const int32_t dec = tag > 0 ? int32_t(tag - 1) : -1;
+        int32_t dec = tag > 0 ? int32_t(tag - 1) : -1;
         FrameIndexPtr idx = m_source.index();
         int32_t pres = -1;
         bool provisional = false;
+        int32_t taggedDec = dec;
+        if (idx && dec >= 0 && dec < idx->packetCount() && m_frame->pts != AV_NOPTS_VALUE &&
+            idx->ordering() == FrameIndex::Ordering::Pts) {
+            // Some decoders re-output an earlier picture with that picture's packet tag (AV1
+            // show_existing_frame through hwaccel) while the pts is right: trust the pts then.
+            const IndexPacket& ip = idx->packet(dec);
+            if (ip.pts != m_frame->pts) {
+                const int32_t byPts = idx->presForPts(m_frame->pts, ip.pres);
+                if (byPts >= 0)
+                    taggedDec = idx->decodeFromPres(byPts);
+            }
+        }
+        dec = taggedDec;
         if (idx && dec >= 0 && dec < idx->packetCount()) {
             const IndexPacket& ip = idx->packet(dec);
             pres = ip.pres;
@@ -336,6 +497,8 @@ private:
         f->key = ff::frameIsKey(f->av);
         f->pictType = av_get_picture_type_char(f->av->pict_type);
         f->provisional = provisional;
+        f->hardware = m_downloaded;
+        m_downloaded = false;
         f->bytes = ff::frameBufferBytes(f->av);
         return f;
     }
@@ -357,6 +520,12 @@ private:
     int32_t m_lastPres = -1;
     int m_mismatches = 0;
     std::set<int32_t> m_skipped;  // decode indices fed with NONREF since the last seek
+    SeekPoint m_lastSeek;
+    AVHWDeviceType m_hwType = AV_HWDEVICE_TYPE_NONE;
+    AVPixelFormat m_hwPixFmt = AV_PIX_FMT_NONE;
+    std::atomic<bool> m_hwFailed{false};
+    int m_hwErrors = 0;
+    bool m_downloaded = false;
 };
 
 VideoInfo describe(const std::string& path, const Demuxer& d)

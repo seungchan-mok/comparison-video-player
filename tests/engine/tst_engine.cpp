@@ -43,6 +43,7 @@ bool openFixture(OpenedEngine& o, int slot, const QString& name)
     if (!fx)
         return false;
     std::string err;
+    o.engine.setHardware(HwConfig{HwPolicy::Off});  // hashes are compared with software references
     if (!o.engine.open(slot, fx->path.toStdString(), InputOptions{}, &err))
         return false;
     o.ref = test::referenceHashes(*fx);
@@ -212,6 +213,7 @@ private slots:
             OpenedEngine o;
             const auto fx = test::fixture(QStringLiteral("hevc_opengop"));
             std::string err;
+            o.engine.setHardware(HwConfig{HwPolicy::Off});
             QVERIFY(o.engine.open(0, fx->path.toStdString(), InputOptions{}, &err));
             PlaybackIntent in;
             in.playing = true;

@@ -29,6 +29,9 @@ std::vector<std::string> referenceHashes(const Fixture& f);
 
 // md5 of a frame's pixels packed with alignment 1 (what ffmpeg's framemd5 hashes).
 std::string frameMd5(const AVFrame* frame);
+// Same, after a lossless repack of hardware output layouts to the planar format a software
+// decoder produces (NV12 -> yuv420p, P010 -> yuv420p10le, P016 -> yuv420p16le).
+std::string frameMd5AsSoftware(const AVFrame* frame);
 
 } // namespace scvp::test
 

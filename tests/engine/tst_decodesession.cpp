@@ -29,7 +29,7 @@ Opened openFixture(const QString& name)
     if (!o.source || !o.source->waitForIndex(30000))
         return o;
     o.pool = std::make_shared<FramePool>(name.toStdString());
-    o.session = o.source->openSession(SessionConfig{o.pool, 0}, &err);
+    o.session = o.source->openSession(SessionConfig{o.pool, 0, HwConfig{HwPolicy::Off}}, &err);
     o.index = o.source->index();
     o.ref = test::referenceHashes(*fx);
     return o;

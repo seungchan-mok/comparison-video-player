@@ -61,6 +61,27 @@ int32_t FrameIndex::estimatePres(int64_t pts) const
     return int32_t(std::llround(double(pts - m_firstPts) * av_q2d(m_timeBase) * m_frameRate));
 }
 
+int32_t FrameIndex::presForPts(int64_t pts, int32_t hint) const
+{
+    if (pts == AV_NOPTS_VALUE || m_presPts.empty())
+        return -1;
+    const int32_t n = frameCount();
+    if (hint >= 0 && hint < n) {
+        for (int32_t d = 0; d <= 64; ++d) {
+            if (hint + d < n && m_presPts[size_t(hint + d)] == pts)
+                return hint + d;
+            if (hint - d >= 0 && m_presPts[size_t(hint - d)] == pts)
+                return hint - d;
+        }
+    }
+    // Within a timestamp segment frame times increase; across a discontinuity they may not, so
+    // only trust the binary search when it finds the exact value.
+    auto it = std::lower_bound(m_presPts.begin(), m_presPts.end(), pts);
+    if (it != m_presPts.end() && *it == pts)
+        return int32_t(it - m_presPts.begin());
+    return -1;
+}
+
 bool FrameIndex::usableKey(int32_t dec) const
 {
     const IndexPacket& p = m_packets[size_t(dec)];
