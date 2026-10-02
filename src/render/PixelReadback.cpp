@@ -13,7 +13,7 @@ constexpr int kSlotBytes = 16;  // RGBA16 colour (8) + RGBA16UI codes (8)
 } // namespace
 
 void PixelReadback::request(GL* gl, const std::array<const RgbConverter*, 2>& conv, const std::array<QPoint, 2>& texel,
-                            const std::array<bool, 2>& gray, QPointF viewPos)
+                            const std::array<CodeKind, 2>& kinds, QPointF viewPos)
 {
     if (m_fence)
         return;  // one read in flight at a time; the next frame asks again
@@ -37,7 +37,8 @@ void PixelReadback::request(GL* gl, const std::array<const RgbConverter*, 2>& co
         s.valid = true;
         s.texel = texel[size_t(i)];
         s.bitDepth = c->bitDepth();
-        s.gray = gray[size_t(i)];
+        s.kind = kinds[size_t(i)];
+        s.gray = s.kind == CodeKind::Gray;
         s.hasCodes = c->codesTexture() != 0;
         m_deep[size_t(i)] = c->deep();
         gl->glBindFramebuffer(GL_READ_FRAMEBUFFER, c->framebuffer());

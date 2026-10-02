@@ -87,6 +87,7 @@ bool Renderer::prepare(Slot& s, const FramePtr& frame, const ColorOverrides& ove
     s.color.chromaBilinear = overrides.chromaBilinear;
     s.color.siting = ChromaSiting::of(frame->av->chroma_location);
     s.gray = source->layout().isGray();
+    s.layoutKind = source->layout().layout;
     s.codes = codes;
     if (!s.conv.convert(m_gl, m_shaders, *source, s.color, codes)) {
         m_error = s.conv.error();
@@ -263,7 +264,7 @@ void Renderer::render(const RenderState& state, GLuint targetFbo)
         const QSizeF view = state.view.imageSize();
         std::array<const RgbConverter*, 2> conv{};
         std::array<QPoint, 2> texel{};
-        std::array<bool, 2> gray{};
+        std::array<CodeKind, 2> kinds{};
         for (int i = 0; i < 2; ++i) {
             const Slot& sl = m_slots[size_t(i)];
             if (!sl.valid)
@@ -272,10 +273,14 @@ void Renderer::render(const RenderState& state, GLuint targetFbo)
             // Same mapping as the display shader: floor(x * k).
             texel[size_t(i)] = QPoint(int(std::floor(state.probePos.x() * sl.conv.width() / view.width())),
                                       int(std::floor(state.probePos.y() * sl.conv.height() / view.height())));
-            gray[size_t(i)] = sl.gray;
+            const Layout l = sl.layoutKind;
+            kinds[size_t(i)] = l == Layout::Gray    ? CodeKind::Gray
+                               : l == Layout::Bayer ? CodeKind::Bayer
+                               : l == Layout::PlanarRgb || l == Layout::PackedRgb ? CodeKind::Rgb
+                                                                                    : CodeKind::Yuv;
         }
         if (state.probePos.x() >= 0 && state.probePos.y() >= 0 && state.probePos.x() < view.width() && state.probePos.y() < view.height())
-            m_readback.request(gl, conv, texel, gray, state.probePos);
+            m_readback.request(gl, conv, texel, kinds, state.probePos);
         else
             m_readback.clear();
         gl->glBindFramebuffer(GL_FRAMEBUFFER, targetFbo);

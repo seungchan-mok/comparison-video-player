@@ -88,6 +88,7 @@ private:
         bool codes = false;             // the converter also wrote the source codes
         SwsContext* sws = nullptr;      // formats the shaders do not read: converted first
         bool gray = false;
+        Layout layoutKind = Layout::PlanarYuv;  // of the converted frame
         bool valid = false;
     };
     bool prepare(Slot& s, const FramePtr& frame, const ColorOverrides& overrides, bool codes);

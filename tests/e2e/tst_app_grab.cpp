@@ -216,7 +216,7 @@ private slots:
         QVERIFY2(!img.isNull(), qPrintable(log));
         QVERIFY2(log.contains(QLatin1String("(frame 17)")), qPrintable(log));
         const QRegularExpressionMatch m =
-            QRegularExpression(QStringLiteral("debug-inspector: A \\((\\d+),(\\d+)\\) RGB \\d+ \\d+ \\d+  code (\\d+) (\\d+) (\\d+)")).match(log);
+            QRegularExpression(QStringLiteral("debug-inspector: A \\((\\d+),(\\d+)\\)  r \\d+ g \\d+ b \\d+  y (\\d+) u (\\d+) v (\\d+)")).match(log);
         QVERIFY2(m.hasMatch(), qPrintable(log));
         // Codes straight from the file: Y plane then interleaved UV.
         QFile f(fx->path);
@@ -248,8 +248,8 @@ private slots:
         if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
             QSKIP("Xvfb not available");
         const QRegularExpressionMatch m =
-            QRegularExpression(QStringLiteral("debug-inspector: A \\((\\d+),(\\d+)\\) RGB (\\d+) (\\d+) (\\d+)  code (\\d+) (\\d+) (\\d+)"
-                                              "   \\|   B \\((\\d+),(\\d+)\\) RGB (\\d+) (\\d+) (\\d+).*A-B 0 0 0"))
+            QRegularExpression(QStringLiteral("debug-inspector: A \\((\\d+),(\\d+)\\)  r (\\d+) g (\\d+) b (\\d+)  y (\\d+) u (\\d+) v (\\d+)"
+                                              "   \\|   B \\((\\d+),(\\d+)\\)  r (\\d+) g (\\d+) b (\\d+).*A-B  r 0 g 0 b 0"))
                 .match(log);
         QVERIFY2(m.hasMatch(), qPrintable(log));
         const int x = m.captured(1).toInt(), y = m.captured(2).toInt();
