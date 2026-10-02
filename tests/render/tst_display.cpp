@@ -55,6 +55,17 @@ struct Target {
     }
 };
 
+FramePtr randomRgb(FramePool& pool, int w, int h, unsigned seed)
+{
+    auto f = std::make_shared<Frame>();
+    f->av = pool.allocFrame(AV_PIX_FMT_RGB24, w, h);
+    std::mt19937 rng(seed);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w * 3; ++x)
+            f->av->data[0][size_t(y) * size_t(f->av->linesize[0]) + size_t(x)] = uint8_t(rng());
+    return f;
+}
+
 std::array<int, 3> src(const AVFrame* f, int x, int y)
 {
     const uint8_t* p = f->data[0] + ptrdiff_t(y) * f->linesize[0] + x * 3;
@@ -71,6 +82,23 @@ class TstDisplay : public QObject {
     Target m_target;
     FramePool m_pool;
     FramePtr m_frame;
+    FramePtr m_frameB;
+
+    // Two videos in a comparison mode; the view gets the pane size like VideoView does.
+    RenderState compareState(int vw, int vh, CompareSettings c, FramePtr b = nullptr)
+    {
+        m_target.create(m_gl.gl(), vw, vh);
+        RenderState s;
+        s.frames = {m_frame, b ? b : m_frameB};
+        s.framebufferSize = QSize(vw, vh);
+        s.background = QColor(10, 20, 30);
+        s.divider = QColor(200, 100, 50);
+        s.compare = c;
+        const QSizeF image(m_frame->width(), m_frame->height());
+        s.view.setImageSize(image);
+        s.view.setViewportSize(QSizeF(CompareLayout::compute(c, s.framebufferSize, image, true, true).paneSize()));
+        return s;
+    }
 
     RenderState stateFor(int vw, int vh)
     {
@@ -97,6 +125,7 @@ private slots:
             for (int x = 0; x < 64 * 3; ++x)
                 f->av->data[0][size_t(y) * size_t(f->av->linesize[0]) + size_t(x)] = uint8_t(rng());
         m_frame = f;
+        m_frameB = randomRgb(m_pool, 64, 48, 77);
     }
 
     void cleanupTestCase()
@@ -172,6 +201,122 @@ private slots:
         m_renderer.render(s, m_target.fbo);
         QVERIFY(m_renderer.timings().converted);
         QCOMPARE(int(m_gl.gl()->glGetError()), int(GL_NO_ERROR));
+    }
+
+    void sideBySidePanesArePixelIdentical()
+    {
+        CompareSettings c;
+        c.mode = CompareMode::Split;
+        RenderState s = compareState(64 * 2 + CompareLayout::kDivider, 48, c);
+        QCOMPARE(s.view.scale(), 1.0);
+        m_renderer.render(s, m_target.fbo);
+        QCOMPARE(m_renderer.layout().orientation, SplitOrientation::SideBySide);
+        const auto px = m_target.read(m_gl.gl());
+        for (int y = 0; y < 48; ++y)
+            for (int x = 0; x < 64; ++x) {
+                QCOMPARE(m_target.at(px, x, y), src(m_frame->av, x, y));
+                QCOMPARE(m_target.at(px, 64 + CompareLayout::kDivider + x, y), src(m_frameB->av, x, y));
+            }
+        QCOMPARE(m_target.at(px, 64, 10), (std::array<int, 3>{200, 100, 50}));  // divider
+    }
+
+    void autoPicksTopBottomForWideImages()
+    {
+        CompareSettings c;
+        c.mode = CompareMode::Split;
+        RenderState s = compareState(64, 48 * 2 + CompareLayout::kDivider, c);
+        m_renderer.render(s, m_target.fbo);
+        QCOMPARE(m_renderer.layout().orientation, SplitOrientation::TopBottom);
+        const auto px = m_target.read(m_gl.gl());
+        for (int y = 0; y < 48; ++y)
+            for (int x = 0; x < 64; ++x) {
+                QCOMPARE(m_target.at(px, x, y), src(m_frame->av, x, y));
+                QCOMPARE(m_target.at(px, x, 48 + CompareLayout::kDivider + y), src(m_frameB->av, x, y));
+            }
+    }
+
+    void wipeSplitsAtTheDivider()
+    {
+        CompareSettings c;
+        c.mode = CompareMode::Wipe;
+        c.wipe = 0.25;  // column 16
+        RenderState s = compareState(64, 48, c);
+        m_renderer.render(s, m_target.fbo);
+        const auto px = m_target.read(m_gl.gl());
+        for (int y = 0; y < 48; ++y)
+            for (int x = 0; x < 64; ++x) {
+                const auto want = x < 16 ? src(m_frame->av, x, y) : x == 16 ? std::array<int, 3>{200, 100, 50} : src(m_frameB->av, x, y);
+                QCOMPARE(m_target.at(px, x, y), want);
+            }
+    }
+
+    void flipShowsOneVideo()
+    {
+        CompareSettings c;
+        c.mode = CompareMode::Flip;
+        c.flipShowsB = true;
+        RenderState s = compareState(64, 48, c);
+        m_renderer.render(s, m_target.fbo);
+        auto px = m_target.read(m_gl.gl());
+        QCOMPARE(m_target.at(px, 5, 7), src(m_frameB->av, 5, 7));
+        s.compare.flipShowsB = false;
+        m_renderer.render(s, m_target.fbo);
+        px = m_target.read(m_gl.gl());
+        QCOMPARE(m_target.at(px, 5, 7), src(m_frame->av, 5, 7));
+        QVERIFY(!m_renderer.timings().converted);  // flipping does not re-convert
+    }
+
+    void differenceIsAbsoluteAndScaled()
+    {
+        CompareSettings c;
+        c.mode = CompareMode::Difference;
+        RenderState s = compareState(64, 48, c, m_frame);  // same frame twice
+        m_renderer.render(s, m_target.fbo);
+        auto px = m_target.read(m_gl.gl());
+        for (int y = 0; y < 48; ++y)
+            for (int x = 0; x < 64; ++x)
+                QCOMPARE(m_target.at(px, x, y), (std::array<int, 3>{0, 0, 0}));
+        s = compareState(64, 48, c);
+        s.compare.diffGain = 2.0;
+        m_renderer.render(s, m_target.fbo);
+        px = m_target.read(m_gl.gl());
+        for (int y = 0; y < 48; ++y)
+            for (int x = 0; x < 64; ++x) {
+                const auto a = src(m_frame->av, x, y), b = src(m_frameB->av, x, y), got = m_target.at(px, x, y);
+                for (int ch = 0; ch < 3; ++ch)
+                    QVERIFY(std::abs(got[size_t(ch)] - std::min(255, 2 * std::abs(a[size_t(ch)] - b[size_t(ch)]))) <= 1);
+            }
+    }
+
+    void otherSizeBCoversTheSameArea()
+    {
+        // B at twice the resolution, view scale 2: each device pixel shows one B pixel.
+        const FramePtr big = randomRgb(m_pool, 128, 96, 9);
+        CompareSettings c;
+        c.mode = CompareMode::Wipe;
+        c.wipe = 0.0;  // all B (the line sits in column 0)
+        RenderState s = compareState(128, 96, c, big);
+        QCOMPARE(s.view.scale(), 2.0);
+        m_renderer.render(s, m_target.fbo);
+        const auto px = m_target.read(m_gl.gl());
+        for (int y = 0; y < 96; ++y)
+            for (int x = 1; x < 128; ++x)
+                QCOMPARE(m_target.at(px, x, y), src(big->av, x, y));
+    }
+
+    void oneVideoIgnoresTheMode()
+    {
+        CompareSettings c;
+        c.mode = CompareMode::Difference;
+        RenderState s = compareState(64, 48, c);
+        s.frames[1] = nullptr;
+        s.view.setViewportSize(QSizeF(64, 48));
+        m_renderer.render(s, m_target.fbo);
+        const auto px = m_target.read(m_gl.gl());
+        QCOMPARE(m_target.at(px, 3, 3), src(m_frame->av, 3, 3));
+        s.frames = {nullptr, m_frameB};
+        m_renderer.render(s, m_target.fbo);
+        QCOMPARE(m_target.at(m_target.read(m_gl.gl()), 3, 3), src(m_frameB->av, 3, 3));
     }
 };
 

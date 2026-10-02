@@ -4,6 +4,7 @@ add_library(scvp_render STATIC
     CudaInteropSource.h CudaInteropSource.cpp
     GlCommon.h
     PixelLayout.h PixelLayout.cpp
+    CompareLayout.h CompareLayout.cpp
     Renderer.h Renderer.cpp
     RgbConverter.h RgbConverter.cpp
     ShaderLibrary.h ShaderLibrary.cpp

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Frame.h"
+#include "render/CompareLayout.h"
 #include "render/ColorParams.h"
 #include "render/CudaInteropSource.h"
 #include "render/RgbConverter.h"
@@ -23,6 +24,8 @@ struct RenderState {
     QSize framebufferSize;           // device pixels
     QColor background{30, 30, 32};
     std::array<ColorOverrides, 2> color;
+    CompareSettings compare;
+    QColor divider{90, 90, 96};      // between split panes, and the wipe line
 };
 
 // How the frame on screen reached its textures.
@@ -49,6 +52,9 @@ public:
 
     const RenderTimings& timings() const { return m_timings; }
     QString error() const { return m_error; }
+    // Panes of the last render (the view transform's viewport must have the pane size; see
+    // CompareLayout::compute).
+    const CompareLayout& layout() const { return m_layout; }
     const RgbConverter& converter(int slot) const { return m_slots[size_t(slot)].conv; }
     ColorParams colorParams(int slot) const { return m_slots[size_t(slot)].color; }
     UploadPath uploadPath(int slot) const { return m_slots[size_t(slot)].path; }
@@ -66,13 +72,15 @@ private:
         bool valid = false;
     };
     bool prepare(Slot& s, const FramePtr& frame, const ColorOverrides& overrides);
-    void drawView(const Slot& s, const ViewTransform& view, QRect viewport, const QColor& bg);
+    // mode: 0 = slot `a` only, 1 = wipe, 2 = difference (as in display.frag).
+    void drawPane(int mode, const Slot& a, const Slot& b, const RenderState& state, QRect pane);
 
     GL* m_gl = nullptr;
     ShaderLibrary m_shaders;
     std::array<Slot, 2> m_slots;
     GLuint m_vao = 0;
     RenderTimings m_timings;
+    CompareLayout m_layout;
     QString m_error;
 };
 

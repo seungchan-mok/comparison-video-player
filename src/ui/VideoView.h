@@ -19,6 +19,10 @@ public:
 
     void setFrames(const std::array<FramePtr, 2>& frames);
     render::ViewTransform& transform() { return m_state.view; }
+    void setCompare(const render::CompareSettings& c);
+    const render::CompareSettings& compare() const { return m_state.compare; }
+    // Panes for the current mode and frames (device px).
+    render::CompareLayout layout() const;
 
     void fitToWindow();
     void oneToOne();
@@ -33,6 +37,7 @@ public:
 signals:
     void doubleClicked();
     void viewChanged();  // zoom/pan changed
+    void compareChanged();  // the wipe divider was dragged
 
 protected:
     void initializeGL() override;
@@ -47,12 +52,15 @@ protected:
 
 private:
     QPointF toDevice(QPointF logical) const;
+    QPointF toPane(QPointF logical) const;  // device px relative to the pane under the point
     void updateGeometry();
     void releaseGl();
 
     render::Renderer m_renderer;
     render::RenderState m_state;
+    bool nearWipeDivider(QPointF logical) const;
     bool m_dragging = false;
+    bool m_draggingWipe = false;
     QPointF m_lastDrag;
     int m_wheelAccum = 0;
     double m_lastPaintMs = 0;

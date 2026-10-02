@@ -94,7 +94,7 @@ bool Renderer::prepare(Slot& s, const FramePtr& frame, const ColorOverrides& ove
     return true;
 }
 
-void Renderer::drawView(const Slot& s, const ViewTransform& view, QRect viewport, const QColor& bg)
+void Renderer::drawPane(int mode, const Slot& a, const Slot& b, const RenderState& state, QRect pane)
 {
     QOpenGLShaderProgram* prog = m_shaders.program(QStringLiteral("fullscreen.vert"), QStringLiteral("display.frag"), QByteArray());
     if (!prog) {
@@ -102,25 +102,48 @@ void Renderer::drawView(const Slot& s, const ViewTransform& view, QRect viewport
         return;
     }
     GL* gl = m_gl;
-    const RgbConverter& conv = s.conv;
+    const ViewTransform& view = state.view;
     const double scale = view.scale();
+    const QSizeF viewSize = view.imageSize();
+    auto k = [&](const Slot& s) { return QSizeF(s.conv.width() / viewSize.width(), s.conv.height() / viewSize.height()); };
+    const QSizeF k0 = k(a), k1 = mode ? k(b) : QSizeF(1, 1);
     const float lod = scale < 1.0 ? float(std::log2(1.0 / scale)) : 0.0f;
-    if (lod > 0.0f)
-        const_cast<RgbConverter&>(conv).ensureMipmaps(gl);
-    gl->glViewport(viewport.x(), viewport.y(), viewport.width(), viewport.height());
+    if (lod > 0.0f) {
+        const_cast<RgbConverter&>(a.conv).ensureMipmaps(gl);
+        if (mode)
+            const_cast<RgbConverter&>(b.conv).ensureMipmaps(gl);
+    }
+    // GL viewport origin is bottom-left.
+    const QSize fb = state.framebufferSize;
+    const QRect vp(pane.x(), fb.height() - pane.y() - pane.height(), pane.width(), pane.height());
+    gl->glViewport(vp.x(), vp.y(), vp.width(), vp.height());
     prog->bind();
     const GLuint id = prog->programId();
     auto loc = [&](const char* n) { return gl->glGetUniformLocation(id, n); };
     gl->glActiveTexture(GL_TEXTURE0);
-    gl->glBindTexture(GL_TEXTURE_2D, conv.rgbTexture());
-    gl->glUniform1i(loc("img"), 0);
-    gl->glUniform2f(loc("imgSize"), float(conv.width()), float(conv.height()));
-    gl->glUniform4f(loc("vp"), float(viewport.x()), float(viewport.y()), float(viewport.width()), float(viewport.height()));
+    gl->glBindTexture(GL_TEXTURE_2D, a.conv.rgbTexture());
+    gl->glActiveTexture(GL_TEXTURE1);
+    gl->glBindTexture(GL_TEXTURE_2D, mode ? b.conv.rgbTexture() : a.conv.rgbTexture());
+    gl->glActiveTexture(GL_TEXTURE0);
+    gl->glUniform1i(loc("img0"), 0);
+    gl->glUniform1i(loc("img1"), 1);
+    gl->glUniform2f(loc("size0"), float(a.conv.width()), float(a.conv.height()));
+    gl->glUniform2f(loc("size1"), float(mode ? b.conv.width() : a.conv.width()), float(mode ? b.conv.height() : a.conv.height()));
+    gl->glUniform2f(loc("k0"), float(k0.width()), float(k0.height()));
+    gl->glUniform2f(loc("k1"), float(k1.width()), float(k1.height()));
+    gl->glUniform2f(loc("viewSize"), float(viewSize.width()), float(viewSize.height()));
+    gl->glUniform4f(loc("vp"), float(vp.x()), float(vp.y()), float(vp.width()), float(vp.height()));
     const QPointF t = view.renderTranslation();
     gl->glUniform2f(loc("T"), float(t.x()), float(t.y()));
     gl->glUniform1f(loc("S"), float(scale));
     gl->glUniform1f(loc("lod"), lod);
+    const QColor& bg = state.background;
     gl->glUniform3f(loc("bg"), float(bg.redF()), float(bg.greenF()), float(bg.blueF()));
+    gl->glUniform1i(loc("mode"), mode);
+    gl->glUniform1f(loc("wipeX"), float(std::floor(state.compare.wipe * pane.width())) + 0.5f);
+    gl->glUniform1f(loc("gain"), float(state.compare.diffGain));
+    const QColor& line = state.divider;
+    gl->glUniform3f(loc("lineColor"), float(line.redF()), float(line.greenF()), float(line.blueF()));
     gl->glBindVertexArray(m_vao);
     gl->glDrawArrays(GL_TRIANGLES, 0, 3);
     gl->glBindVertexArray(0);
@@ -144,12 +167,25 @@ void Renderer::render(const RenderState& state, GLuint targetFbo)
     gl->glDisable(GL_SCISSOR_TEST);
     const QSize fb = state.framebufferSize;
     gl->glViewport(0, 0, fb.width(), fb.height());
-    gl->glClearColor(float(state.background.redF()), float(state.background.greenF()), float(state.background.blueF()), 1.0f);
-    gl->glClear(GL_COLOR_BUFFER_BIT);
-
     const Slot& a = m_slots[0];
-    if (a.valid)
-        drawView(a, state.view, QRect(0, 0, fb.width(), fb.height()), state.background);
+    const Slot& b = m_slots[1];
+    m_layout = CompareLayout::compute(state.compare, fb, state.view.imageSize(), a.valid, b.valid);
+    // The divider colour fills the gap between split panes.
+    const QColor& clear = m_layout.panes.size() > 1 ? state.divider : state.background;
+    gl->glClearColor(float(clear.redF()), float(clear.greenF()), float(clear.blueF()), 1.0f);
+    gl->glClear(GL_COLOR_BUFFER_BIT);
+    if (!a.valid && !b.valid)
+        return;
+    const CompareMode mode = state.compare.mode;
+    for (const Pane& pane : m_layout.panes) {
+        const Slot& first = m_slots[size_t(pane.slot)];
+        if (!first.valid)
+            continue;
+        int shaderMode = 0;
+        if (a.valid && b.valid && m_layout.panes.size() == 1)
+            shaderMode = mode == CompareMode::Wipe ? 1 : mode == CompareMode::Difference ? 2 : 0;
+        drawPane(shaderMode, first, b, state, pane.rect);
+    }
 }
 
 } // namespace scvp::render
