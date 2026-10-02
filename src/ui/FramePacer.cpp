@@ -10,6 +10,21 @@
 
 namespace scvp::ui {
 
+double VsyncClock::update(double wall)
+{
+    if (m_anchorWall < 0) {
+        // A new run shows its first frame one period from now.
+        m_anchorWall = wall - m_period;
+        m_anchorMedia = m_media;
+        m_ticks = 0;
+    }
+    const int64_t ticks = std::llround((wall - m_anchorWall) / m_period);
+    if (ticks > m_ticks)
+        m_ticks = ticks;
+    m_media = m_anchorMedia + double(m_ticks) * m_period;
+    return m_media;
+}
+
 FramePacer::FramePacer(QOpenGLWidget* view, QObject* parent)
     : QObject(parent)
     , m_view(view)
@@ -18,6 +33,7 @@ FramePacer::FramePacer(QOpenGLWidget* view, QObject* parent)
     if (QScreen* s = QGuiApplication::primaryScreen())
         if (s->refreshRate() > 1)
             m_period = 1.0 / s->refreshRate();
+    m_clock.setPeriod(m_period);
     connect(view, &QOpenGLWidget::frameSwapped, this, &FramePacer::onSwapped);
     m_timer.setTimerType(Qt::PreciseTimer);
     connect(&m_timer, &QTimer::timeout, this, [this] { advance(m_wall.nsecsElapsed() / 1e9); });
@@ -29,7 +45,7 @@ FramePacer::FramePacer(QOpenGLWidget* view, QObject* parent)
     });
 }
 
-double FramePacer::now() const { return m_media; }
+double FramePacer::now() const { return m_clock.media(); }
 
 void FramePacer::setActive(bool active)
 {
@@ -37,6 +53,7 @@ void FramePacer::setActive(bool active)
         return;
     m_active = active;
     m_lastSwap = -1.0;
+    m_clock.restart();
     if (!active) {
         m_timer.stop();
         m_watchdog.stop();
@@ -70,19 +87,9 @@ void FramePacer::onSwapped()
 
 void FramePacer::advance(double wall)
 {
-    if (m_lastSwap < 0) {
-        m_lastSwap = wall;
-        m_media += m_period;
-    } else {
-        const double dt = wall - m_lastSwap;
-        const int n = std::max(1, int(std::lround(dt / m_period)));
-        if (n == 1 && dt > m_period * 0.5 && dt < m_period * 1.5)
-            m_period = m_period * 0.95 + dt * 0.05;  // follow the real refresh rate
-        m_media += n * m_period;
-        m_lastSwap = wall;
-    }
+    m_lastSwap = wall;
     m_watchdog.start();
-    emit tick(m_media);
+    emit tick(m_clock.update(wall));
     m_view->update();  // keep the swap loop running
 }
 
