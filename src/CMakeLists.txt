@@ -1,4 +1,5 @@
 add_subdirectory(engine)
+add_subdirectory(render)
 
 qt_add_executable(scvp WIN32 MACOSX_BUNDLE
     main.cpp

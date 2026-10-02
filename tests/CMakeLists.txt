@@ -36,3 +36,4 @@ function(scvp_add_test name)
 endfunction()
 
 add_subdirectory(engine)
+add_subdirectory(render)
