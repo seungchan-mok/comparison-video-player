@@ -28,6 +28,7 @@ void Renderer::release()
         s.valid = false;
     }
     m_digits.release(m_gl);
+    m_readback.release(m_gl);
     if (m_vao)
         m_gl->glDeleteVertexArrays(1, &m_vao);
     m_vao = 0;
@@ -156,6 +157,9 @@ void Renderer::drawPane(int mode, const Slot& a, const Slot& b, const RenderStat
     gl->glUniform1i(loc("field"), geom.field);
     gl->glUniform2f(loc("glyph"), float(geom.glyphW), float(geom.glyphH));
     gl->glUniform1f(loc("rowH"), float(geom.rowH));
+    const bool outline = state.probe && magnified && scale >= 4.0 * dpr;
+    gl->glUniform2f(loc("cursor"), outline ? float(std::floor(state.probePos.x())) : -1.0f,
+                    outline ? float(std::floor(state.probePos.y())) : -1.0f);
     gl->glUniform1f(loc("gridAlpha"), ov.grid && magnified && scale >= kGridMinLogicalPx * dpr ? 0.25f : 0.0f);
     gl->glUniform2f(loc("size0"), float(a.conv.width()), float(a.conv.height()));
     gl->glUniform2f(loc("size1"), float(mode ? b.conv.width() : a.conv.width()), float(mode ? b.conv.height() : a.conv.height()));
@@ -190,7 +194,8 @@ void Renderer::render(const RenderState& state, GLuint targetFbo)
     m_timings = {};
     for (int i = 0; i < 2; ++i)
         prepare(m_slots[size_t(i)], state.frames[size_t(i)], state.color[size_t(i)],
-                state.overlay.values && state.overlay.mode == ValueMode::Codes);
+                (state.overlay.values && state.overlay.mode == ValueMode::Codes) || state.probe);
+    m_readback.poll(m_gl);
 
     GL* gl = m_gl;
     gl->glBindFramebuffer(GL_FRAMEBUFFER, targetFbo);
@@ -219,6 +224,27 @@ void Renderer::render(const RenderState& state, GLuint targetFbo)
         if (a.valid && b.valid && m_layout.panes.size() == 1)
             shaderMode = mode == CompareMode::Wipe ? 1 : mode == CompareMode::Difference ? 2 : 0;
         drawPane(shaderMode, first, b, state, pane.rect);
+    }
+    if (state.probe) {
+        const QSizeF view = state.view.imageSize();
+        std::array<const RgbConverter*, 2> conv{};
+        std::array<QPoint, 2> texel{};
+        std::array<bool, 2> gray{};
+        for (int i = 0; i < 2; ++i) {
+            const Slot& sl = m_slots[size_t(i)];
+            if (!sl.valid)
+                continue;
+            conv[size_t(i)] = &sl.conv;
+            // Same mapping as the display shader: floor(x * k).
+            texel[size_t(i)] = QPoint(int(std::floor(state.probePos.x() * sl.conv.width() / view.width())),
+                                      int(std::floor(state.probePos.y() * sl.conv.height() / view.height())));
+            gray[size_t(i)] = sl.gray;
+        }
+        if (state.probePos.x() >= 0 && state.probePos.y() >= 0 && state.probePos.x() < view.width() && state.probePos.y() < view.height())
+            m_readback.request(gl, conv, texel, gray, state.probePos);
+        else
+            m_readback.clear();
+        gl->glBindFramebuffer(GL_FRAMEBUFFER, targetFbo);
     }
 }
 

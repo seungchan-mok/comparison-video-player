@@ -7,6 +7,7 @@
 
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QMouseEvent>
 #include <QSurfaceFormat>
 #include <QTimer>
 
@@ -78,7 +79,8 @@ int main(int argc, char* argv[])
     QCommandLineOption debugSize(QStringLiteral("debug-size"), QStringLiteral("Window size WxH."), QStringLiteral("WxH"));
     QCommandLineOption debugGrabWindow(QStringLiteral("debug-grab-window"), QStringLiteral("Grab the whole window, not just the video."));
     QCommandLineOption debugActions(QStringLiteral("debug-actions"), QStringLiteral("Comma separated actions to trigger after opening (e.g. info_overlay,fullscreen)."), QStringLiteral("ids"));
-    for (const auto& o : {debugGrab, debugAfter, debugSeek, debugPlay, debugSize, debugGrabWindow, debugActions}) {
+    QCommandLineOption debugHover(QStringLiteral("debug-hover"), QStringLiteral("Move the mouse over the view at X,Y (logical px)."), QStringLiteral("x,y"));
+    for (const auto& o : {debugGrab, debugAfter, debugSeek, debugPlay, debugSize, debugGrabWindow, debugActions, debugHover}) {
         QCommandLineOption hidden = o;
         hidden.setFlags(QCommandLineOption::HiddenFromHelp);
         parser.addOption(hidden);
@@ -144,6 +146,15 @@ int main(int argc, char* argv[])
                         window.handleAction(scvp::ui::Action(a), false);
         });
     }
+    if (parser.isSet(debugHover)) {
+        const QStringList xy = parser.value(debugHover).split(QLatin1Char(','));
+        const QPointF at(xy.value(0).toDouble(), xy.value(1).toDouble());
+        QTimer::singleShot(400, &window, [&window, at] {
+            QWidget* v = window.view();
+            QMouseEvent move(QEvent::MouseMove, at, v->mapToGlobal(at), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(v, &move);
+        });
+    }
     if (parser.isSet(debugGrab)) {
         const QString out = parser.value(debugGrab);
         const bool wholeWindow = parser.isSet(debugGrabWindow);
@@ -152,6 +163,7 @@ int main(int argc, char* argv[])
             const bool ok = img.save(out);
             std::fprintf(stderr, "debug-grab: %s %dx%d -> %s (frame %lld)\n", ok ? "saved" : "FAILED", img.width(), img.height(),
                          qPrintable(out), (long long)window.player()->controller().position());
+            std::fprintf(stderr, "debug-inspector: %s\n", qPrintable(window.inspectorText()));
             QApplication::exit(ok ? 0 : 1);
         });
     }

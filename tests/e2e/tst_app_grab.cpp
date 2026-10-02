@@ -194,6 +194,48 @@ private slots:
         const QPointF c = vt.imageToDevice(QPointF(160, 120));
         QVERIFY(img.pixelColor(int(c.x()), int(c.y())) != QColor(30, 30, 32));
     }
+
+    // Hovering reads the pixel back from the GPU: synced A and B agree and match the decoder.
+    void inspectorReadsThePixelUnderTheCursor()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        const auto a = test::fixture(QStringLiteral("ffv1_10bit"));
+        const auto b = test::fixture(QStringLiteral("ffv1_10bit_trim3"));
+        QString log;
+        // 700x600 window: view fit is integral; hover the view centre.
+        const QImage img = grab({a->path, b->path},
+                                {QStringLiteral("--offset"), QStringLiteral("-3"), QStringLiteral("--view"), QStringLiteral("wipe"),
+                                 QStringLiteral("--debug-seek"), QStringLiteral("40"), QStringLiteral("--debug-hover"), QStringLiteral("100,100"),
+                                 QStringLiteral("--debug-after"), QStringLiteral("2000")},
+                                &log);
+        if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
+            QSKIP("Xvfb not available");
+        const QRegularExpressionMatch m =
+            QRegularExpression(QStringLiteral("debug-inspector: A \\((\\d+),(\\d+)\\) RGB (\\d+) (\\d+) (\\d+)  code (\\d+) (\\d+) (\\d+)"
+                                              "   \\|   B \\((\\d+),(\\d+)\\) RGB (\\d+) (\\d+) (\\d+).*A-B 0 0 0"))
+                .match(log);
+        QVERIFY2(m.hasMatch(), qPrintable(log));
+        const int x = m.captured(1).toInt(), y = m.captured(2).toInt();
+        QCOMPARE(m.captured(9).toInt(), x);
+        QCOMPARE(m.captured(10).toInt(), y);
+        render::ViewTransform vt;
+        vt.setViewportSize(QSizeF(img.size()));
+        vt.setImageSize(QSizeF(320, 240));
+        const QPointF expect = vt.deviceToImage(QPointF(100, 100));
+        QCOMPARE(x, int(expect.x()));
+        QCOMPARE(y, int(expect.y()));
+        // Codes are the decoder's (frame 40 of A), RGB the CPU reference conversion.
+        FramePtr f = decodeFrame(a->path, 40);
+        QVERIFY(f);
+        const auto layout = *render::PixelLayout::of(f->format());
+        const auto codes = render::readCodes(f->av, layout, x, y);
+        const auto color = render::ColorParams::resolve(layout, f->av->colorspace, f->av->color_range, f->height());
+        const auto rgb = color.toRgb(codes[0], codes[1], codes[2]);
+        for (int c = 0; c < 3; ++c) {
+            QCOMPARE(m.captured(6 + c).toUInt(), codes[size_t(c)]);
+            QVERIFY(std::abs(m.captured(3 + c).toInt() - rgb[size_t(c)]) <= 1);
+        }
+    }
 };
 
 QTEST_GUILESS_MAIN(TstAppGrab)

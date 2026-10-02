@@ -56,6 +56,14 @@ void HudOverlay::setInfoVisible(bool on)
     update();
 }
 
+void HudOverlay::setPixelText(const QString& text)
+{
+    if (text == m_pixelText)
+        return;
+    m_pixelText = text;
+    update();
+}
+
 void HudOverlay::setStalled(bool stalled)
 {
     m_stalled = stalled;
@@ -177,6 +185,13 @@ void HudOverlay::paintEvent(QPaintEvent*)
     p.setFont(mono);
     const QFontMetrics fm(mono);
     paintPaneLabels(p, fm);
+    if (!m_pixelText.isEmpty()) {
+        const int h = fm.height() + 8;
+        const QRect box(0, height() - h, std::min(width(), fm.horizontalAdvance(m_pixelText) + 16), h);
+        p.fillRect(box, QColor(0, 0, 0, 170));
+        p.setPen(QColor(235, 235, 235));
+        p.drawText(box.adjusted(8, 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft, m_pixelText);
+    }
     if (m_info) {
         const QStringList ls = lines();
         int w = 0;

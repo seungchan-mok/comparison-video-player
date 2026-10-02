@@ -36,6 +36,7 @@ uniform int field;       // glyphs per row
 uniform vec2 glyph;      // glyph width, height (cell units)
 uniform float rowH;
 uniform float gridAlpha; // 0: no grid
+uniform vec2 cursor;     // view pixel outlined (linked cursor), negative: none
 
 out vec4 o;
 
@@ -117,6 +118,13 @@ void main()
         vec2 u = fract(x);
         if (gridAlpha > 0.0 && (u.x * S < 1.0 || u.y * S < 1.0))
             c = mix(c, vec3(luminance(c) > 0.179 ? 0.0 : 1.0), gridAlpha);
+        if (cursor.x >= 0.0 && floor(x) == cursor) {
+            vec2 e = min(u, 1.0 - u) * S;  // device px to the cell edge
+            if (min(e.x, e.y) < 2.0) {
+                o = vec4(luminance(c) > 0.179 ? vec3(0.0) : vec3(1.0, 0.85, 0.2), 1.0);
+                return;
+            }
+        }
         if (values != 0) {
             ivec3 v;
             if (values == 2) {

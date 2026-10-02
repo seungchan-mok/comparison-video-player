@@ -22,6 +22,8 @@ public:
     bool infoVisible() const { return m_info; }
     void setStalled(bool stalled);
     void reposition();
+    void setPixelText(const QString& text);  // pixel inspector line ("" hides it)
+    QString pixelText() const { return m_pixelText; }
 
 protected:
     void paintEvent(QPaintEvent* e) override;
@@ -35,6 +37,7 @@ private:
     Player* m_player;
     QTimer m_refresh;
     QTimer m_stallDelay;
+    QString m_pixelText;
     bool m_info = false;
     bool m_stalled = false;
     bool m_showStall = false;

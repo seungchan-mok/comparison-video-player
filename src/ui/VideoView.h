@@ -40,6 +40,8 @@ signals:
     void doubleClicked();
     void viewChanged();  // zoom/pan changed
     void compareChanged();  // the wipe divider was dragged
+    // Values of the pixel under the cursor (invalid when it is not over the image).
+    void sampleChanged(const scvp::render::PixelSample& sample);
 
 protected:
     void initializeGL() override;
@@ -50,6 +52,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* e) override;
     void mouseReleaseEvent(QMouseEvent* e) override;
     void mouseDoubleClickEvent(QMouseEvent* e) override;
+    void leaveEvent(QEvent* e) override;
     bool event(QEvent* e) override;
 
 private:
@@ -63,6 +66,9 @@ private:
     bool nearWipeDivider(QPointF logical) const;
     bool m_dragging = false;
     bool m_draggingWipe = false;
+    bool m_hovering = false;
+    QPointF m_hoverPos;  // logical
+    render::PixelSample m_lastSample;
     QPointF m_lastDrag;
     int m_wheelAccum = 0;
     double m_lastPaintMs = 0;

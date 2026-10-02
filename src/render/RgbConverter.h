@@ -21,6 +21,7 @@ public:
 
     GLuint rgbTexture() const { return m_rgb; }
     GLuint codesTexture() const { return m_hasCodes ? m_codes : 0; }
+    GLuint framebuffer() const { return m_fbo; }
     int width() const { return m_w; }
     int height() const { return m_h; }
     bool deep() const { return m_deep; }

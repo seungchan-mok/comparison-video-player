@@ -6,6 +6,7 @@
 #include "render/CudaInteropSource.h"
 #include "render/DigitAtlas.h"
 #include "render/PixelOverlay.h"
+#include "render/PixelReadback.h"
 #include "render/RgbConverter.h"
 #include "render/ShaderLibrary.h"
 #include "render/TextureSource.h"
@@ -29,6 +30,9 @@ struct RenderState {
     CompareSettings compare;
     PixelOverlaySettings overlay;
     double devicePixelRatio = 1.0;   // for size thresholds given in logical px
+    // Pixel under the cursor (view image coordinates): outlined in every pane and read back.
+    bool probe = false;
+    QPointF probePos;
     QColor divider{90, 90, 96};      // between split panes, and the wipe line
 };
 
@@ -59,6 +63,11 @@ public:
     // Panes of the last render (the view transform's viewport must have the pane size; see
     // CompareLayout::compute).
     const CompareLayout& layout() const { return m_layout; }
+    // Latest finished read-back of the probed pixel; pending while one is in flight (render
+    // again to collect it). finishSample() waits for it (tests).
+    const PixelSample& sample() const { return m_readback.result(); }
+    bool samplePending() const { return m_readback.pending(); }
+    void finishSample() { m_readback.poll(m_gl, true); }
     const RgbConverter& converter(int slot) const { return m_slots[size_t(slot)].conv; }
     ColorParams colorParams(int slot) const { return m_slots[size_t(slot)].color; }
     UploadPath uploadPath(int slot) const { return m_slots[size_t(slot)].path; }
@@ -86,6 +95,7 @@ private:
     std::array<Slot, 2> m_slots;
     GLuint m_vao = 0;
     DigitAtlas m_digits;
+    PixelReadback m_readback;
     RenderTimings m_timings;
     CompareLayout m_layout;
     QString m_error;

@@ -3,6 +3,7 @@
 #include "ui/ControlBar.h"
 #include "ui/HudOverlay.h"
 #include "ui/KeyRouter.h"
+#include "ui/PixelInspector.h"
 #include "ui/Player.h"
 #include "ui/Stage.h"
 #include "ui/VideoView.h"
@@ -11,7 +12,9 @@
 
 #include <algorithm>
 
+#include <QClipboard>
 #include <QCloseEvent>
+#include <QGuiApplication>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFileDialog>
@@ -46,6 +49,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_player, &Player::mediaChanged, this, [this] { updateTitle(); });
     connect(m_view, &VideoView::doubleClicked, this, &MainWindow::toggleFullscreen);
     connect(m_view, &VideoView::compareChanged, m_hud, qOverload<>(&QWidget::update));
+    connect(m_view, &VideoView::sampleChanged, this, [this](const render::PixelSample& s) { m_hud->setPixelText(formatPixelSample(s)); });
     connect(m_player, &Player::mediaChanged, m_hud, qOverload<>(&QWidget::update));
     updateTitle();
 }
@@ -171,6 +175,8 @@ render::CompareSettings nextCompare(render::CompareSettings c, Action a, render:
     return c;
 }
 
+QString MainWindow::inspectorText() const { return m_hud->pixelText(); }
+
 void MainWindow::setCompare(const render::CompareSettings& c)
 {
     m_view->setCompare(c);
@@ -207,6 +213,15 @@ void MainWindow::createMenus()
     quit->setMenuRole(QAction::QuitRole);
     // App commands must also work while the menu bar is hidden (fullscreen).
     addActions({openA, openB, close, closeB, settings, quit});
+
+    QMenu* edit = menuBar()->addMenu(tr("&Edit"));
+    QAction* copy = edit->addAction(tr("&Copy pixel values"), this, [this] {
+        const QString t = m_hud->pixelText();
+        if (!t.isEmpty())
+            QGuiApplication::clipboard()->setText(t);
+    });
+    copy->setShortcut(QKeySequence::Copy);
+    addAction(copy);
 
     QMenu* play = menuBar()->addMenu(tr("&Playback"));
     for (Action a : {Action::PlayPause, Action::StepForward, Action::StepBack, Action::JumpForward, Action::JumpBack,

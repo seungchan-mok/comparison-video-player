@@ -36,6 +36,7 @@ public:
     void overrideGpuBudget(size_t bytes);
     void reopenAll();  // after a decoding change: same files, same frame
     void setCompare(const render::CompareSettings& c);
+    QString inspectorText() const;
 
 protected:
     void dragEnterEvent(QDragEnterEvent* e) override;

@@ -5,6 +5,7 @@
 #include <QNativeGestureEvent>
 #include <QOpenGLContext>
 #include <QOpenGLVersionFunctionsFactory>
+#include <QTimer>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -112,8 +113,39 @@ void VideoView::paintGL()
     QElapsedTimer t;
     t.start();
     updateGeometry();
+    // The pixel under the cursor, recomputed every paint (zoom, pan and new frames move it).
+    m_state.probe = m_hovering && (m_state.frames[0] || m_state.frames[1]);
+    if (m_state.probe) {
+        const QPointF d = toPane(m_hoverPos);
+        m_state.probePos = m_state.view.deviceToImage(QPointF(std::floor(d.x()), std::floor(d.y())));
+    }
     m_renderer.render(m_state, defaultFramebufferObject());
     m_lastPaintMs = t.nsecsElapsed() / 1e6;
+    const render::PixelSample& s = m_renderer.sample();
+    auto same = [](const render::PixelSample& a, const render::PixelSample& b) {
+        if (a.valid != b.valid || a.viewPos != b.viewPos)
+            return false;
+        for (int i = 0; i < 2; ++i) {
+            const auto &x = a.videos[size_t(i)], &y = b.videos[size_t(i)];
+            if (x.valid != y.valid || x.texel != y.texel || x.rgb != y.rgb || x.codes != y.codes || x.hasCodes != y.hasCodes)
+                return false;
+        }
+        return true;
+    };
+    const render::PixelSample shown = m_state.probe ? s : render::PixelSample{};
+    if (!same(shown, m_lastSample)) {
+        m_lastSample = shown;
+        emit sampleChanged(shown);
+    }
+    if (m_renderer.samplePending())
+        QTimer::singleShot(0, this, qOverload<>(&QWidget::update));  // collect it next frame
+}
+
+void VideoView::leaveEvent(QEvent* e)
+{
+    m_hovering = false;
+    update();
+    QOpenGLWidget::leaveEvent(e);
 }
 
 void VideoView::fitToWindow()
@@ -203,6 +235,9 @@ void VideoView::mousePressEvent(QMouseEvent* e)
 
 void VideoView::mouseMoveEvent(QMouseEvent* e)
 {
+    m_hovering = true;
+    m_hoverPos = e->position();
+    update();
     if (m_draggingWipe) {
         m_state.compare.wipe = std::clamp(e->position().x() / std::max(1, width()), 0.0, 1.0);
         emit compareChanged();
