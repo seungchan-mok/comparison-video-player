@@ -60,6 +60,7 @@ public:
     bool slotOpen(int slot) const override { return m_engine.isOpen(slot); }
     RangeSetPtr cachedRanges(int slot) const override { return m_engine.cachedRanges(slot); }
     int64_t slotOffset(int slot) const override { return m_controller.mapper().shift(slot); }
+    std::pair<int64_t, int64_t> slotSpan(int slot) const override;
     bool hasLoop() const override { return m_controller.hasLoop(); }
     bool loopActive() const override { return m_controller.loopActive(); }
     int64_t loopFirst() const override { return m_controller.loopFirst(); }

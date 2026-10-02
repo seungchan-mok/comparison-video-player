@@ -155,6 +155,16 @@ void Player::swapSlots()
     emit mediaChanged();
 }
 
+std::pair<int64_t, int64_t> Player::slotSpan(int slot) const
+{
+    const TimelineMapper m = m_controller.mapper();
+    const int64_t n = m.length();
+    if (!m.bothOpen() || n <= 0)
+        return {0, n - 1};
+    const int64_t last = m.local(slot, n - 1).frame;  // the video's last frame
+    return {m.positionOf(slot, 0), m.positionOf(slot, last)};
+}
+
 int64_t Player::indexedFrames() const
 {
     FrameIndexPtr idx = m_engine.index(m_controller.masterSlot());

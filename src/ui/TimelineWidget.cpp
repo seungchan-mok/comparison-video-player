@@ -126,6 +126,17 @@ void TimelineWidget::paintEvent(QPaintEvent*)
         const double y = both ? (s == 0 ? t.top() : t.center().y()) : t.top();
         const double h = both ? t.height() / 2.0 : t.height();
         const int64_t off = m_model->slotOffset(s);
+        if (both) {
+            // Where this video holds its first or last frame: hatched.
+            const auto [first, last] = m_model->slotSpan(s);
+            p.setBrush(QBrush(QColor(255, 255, 255, 60), Qt::BDiagPattern));
+            const double xs = t.left() + double(std::max<int64_t>(first, 0)) / double(n) * t.width();
+            const double xe = t.left() + double(std::min<int64_t>(last + 1, n)) / double(n) * t.width();
+            if (xs > t.left())
+                p.drawRect(QRectF(t.left(), y + 1, xs - t.left(), h - 2));
+            if (xe < t.right())
+                p.drawRect(QRectF(xe, y + 1, t.right() - xe, h - 2));
+        }
         for (const FrameRange& fr : r->ranges) {
             p.setBrush(s == 0 ? (fr.gpu ? kCachedAGpu : kCachedA) : (fr.gpu ? kCachedBGpu : kCachedB));
             const double x0 = t.left() + double(fr.first - off) / double(n) * t.width();
