@@ -4,6 +4,7 @@ add_library(scvp_engine STATIC
     FfmpegCompat.h FfmpegCompat.cpp
     Frame.h
     FrameAllocator.h FrameAllocator.cpp
+    FrameCache.h FrameCache.cpp
     Demux.h Demux.cpp
     FFmpegSource.h FFmpegSource.cpp
     FrameIndex.h FrameIndex.cpp
