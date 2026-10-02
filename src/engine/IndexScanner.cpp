@@ -163,6 +163,80 @@ private:
     int64_t m_step = 1 << 20;
 };
 
+// MPEG-1/2/4 Part 2 in AVI or raw: demuxers give B-frames a pts but anchors (I/P) none. With
+// these codecs' one-frame reordering an anchor is shown right before the next anchor, so its pts
+// is the next anchor's dts (the last one: one frame after the last dts). Until that next anchor
+// arrives the anchor sorts last and is not final.
+class AnchorTimestamps {
+public:
+    static constexpr int64_t kPending = INT64_MAX / 4;
+
+    explicit AnchorTimestamps(const AVStream* st)
+    {
+        const AVCodecID id = st->codecpar->codec_id;
+        if (id != AV_CODEC_ID_MPEG1VIDEO && id != AV_CODEC_ID_MPEG2VIDEO && id != AV_CODEC_ID_MPEG4)
+            return;
+        m_parser.reset(av_parser_init(id));
+        m_ctx.reset(avcodec_alloc_context3(nullptr));
+        if (!m_parser || !m_ctx || avcodec_parameters_to_context(m_ctx.get(), st->codecpar) < 0)
+            m_parser.reset();
+        else
+            m_parser->flags |= PARSER_FLAG_COMPLETE_FRAMES;
+    }
+
+    bool decide(const AVPacket& pkt)
+    {
+        if (!m_decided) {
+            m_decided = true;
+            m_active = m_parser && pkt.pts == AV_NOPTS_VALUE && pkt.dts != AV_NOPTS_VALUE;
+            if (!m_active)
+                m_parser.reset();
+        }
+        return m_active;
+    }
+    bool active() const { return m_active; }
+
+    // Before builder.add(): B-frames get pts = dts, anchors the pending marker. Resolves the
+    // previous anchor in the builder.
+    void assign(AVPacket& pkt, int32_t dec, FrameIndexBuilder& builder)
+    {
+        uint8_t* out = nullptr;
+        int outSize = 0;
+        av_parser_parse2(m_parser.get(), m_ctx.get(), &out, &outSize, pkt.data, pkt.size, AV_NOPTS_VALUE, AV_NOPTS_VALUE, pkt.pos);
+        if (m_lastDts != AV_NOPTS_VALUE && pkt.dts > m_lastDts)
+            m_frameDuration = pkt.dts - m_lastDts;
+        m_lastDts = pkt.dts;
+        if (m_parser->pict_type == AV_PICTURE_TYPE_B) {
+            if (pkt.pts == AV_NOPTS_VALUE)
+                pkt.pts = pkt.dts;
+            return;
+        }
+        if (m_pendingDec >= 0)
+            builder.setPts(m_pendingDec, pkt.dts);
+        m_pendingDec = dec;
+        pkt.pts = kPending;
+    }
+
+    void finish(FrameIndexBuilder& builder)
+    {
+        if (m_pendingDec >= 0)
+            builder.setPts(m_pendingDec, m_lastDts + m_frameDuration);
+        m_pendingDec = -1;
+    }
+
+private:
+    struct ParserDel {
+        void operator()(AVCodecParserContext* p) const { av_parser_close(p); }
+    };
+    std::unique_ptr<AVCodecParserContext, ParserDel> m_parser;
+    ff::CodecContextPtr m_ctx;
+    bool m_decided = false;
+    bool m_active = false;
+    int32_t m_pendingDec = -1;
+    int64_t m_lastDts = AV_NOPTS_VALUE;
+    int64_t m_frameDuration = 1;
+};
+
 } // namespace
 
 IndexScanner::IndexScanner(std::string path, InputOptions opts, SnapshotFn onSnapshot)
@@ -224,6 +298,7 @@ FrameIndexPtr IndexScanner::scan(const std::string& path, const InputOptions& op
 
     FirstOutputProbe probe(st);
     PocTimestamps poc(st);
+    AnchorTimestamps anchors(st);
     const int64_t fileSize = fmt->pb ? avio_size(fmt->pb) : -1;
     auto pkt = ff::makePacket();
     auto lastPublish = Clock::now();
@@ -239,7 +314,8 @@ FrameIndexPtr IndexScanner::scan(const std::string& path, const InputOptions& op
                 rate = AVRational{30, 1};  // no timing in the bitstream
             builder.setPocTiming(rate, poc.reorderMargin());
         } else {
-            builder.setOrdering(builder.missingPts() ? FrameIndex::Ordering::Decode : FrameIndex::Ordering::Pts);
+            const bool ptsOrder = anchors.active() || !builder.missingPts();
+            builder.setOrdering(ptsOrder ? FrameIndex::Ordering::Pts : FrameIndex::Ordering::Decode);
         }
         auto snapshot = builder.build(complete);
         publishedAt = builder.size();
@@ -261,7 +337,11 @@ FrameIndexPtr IndexScanner::scan(const std::string& path, const InputOptions& op
         if (pkt->stream_index == demux->stream) {
             if (poc.decide(*pkt))
                 poc.assign(*pkt);
+            else if (anchors.decide(*pkt))
+                anchors.assign(*pkt, int32_t(builder.size()), builder);
             builder.add(*pkt);
+            if (probe.active() && anchors.active())
+                probe.drain();  // pending anchor pts are markers, not times: no open-GOP probe
             if (probe.active()) {
                 probe.feed(pkt.get());
                 if (probe.done())
@@ -284,6 +364,7 @@ FrameIndexPtr IndexScanner::scan(const std::string& path, const InputOptions& op
             publish(false);
         }
     }
+    anchors.finish(builder);
     if (probe.active()) {
         probe.drain();
         builder.setFirstOutputPts(probe.firstPts());

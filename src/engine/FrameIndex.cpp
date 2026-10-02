@@ -208,6 +208,18 @@ void FrameIndexBuilder::add(const IndexPacket& in)
     m_packets.push_back(p);
 }
 
+void FrameIndexBuilder::setPts(int32_t dec, int64_t pts)
+{
+    if (dec < 0 || size_t(dec) >= m_packets.size())
+        return;
+    IndexPacket& p = m_packets[size_t(dec)];
+    if (p.pts == AV_NOPTS_VALUE && pts != AV_NOPTS_VALUE && m_missingPts)
+        --m_missingPts;
+    p.pts = pts;
+    if (pts != AV_NOPTS_VALUE && (m_maxPts == AV_NOPTS_VALUE || pts > m_maxPts))
+        m_maxPts = pts;
+}
+
 std::shared_ptr<FrameIndex> FrameIndexBuilder::build(bool complete) const
 {
     auto idx = std::make_shared<FrameIndex>();

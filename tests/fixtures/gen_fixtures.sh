@@ -85,6 +85,10 @@ ref mjpeg container mjpeg.avi - -i mjpeg.avi
 ff "${SRC_LAVFI[@]}" -t 4 -c:v libx264 -preset veryfast -bf 3 -g 48 -sc_threshold 0 h264_b.avi
 ref h264_b_avi container h264_b.avi - -i h264_b.avi
 
+# MPEG-4 Part 2 with B-frames in AVI: the demuxer gives anchors no pts.
+ff "${SRC_LAVFI[@]}" -t 4 -c:v mpeg4 -bf 2 -g 24 -q:v 4 mpeg4_b.avi
+ref mpeg4_b_avi container mpeg4_b.avi - -i mpeg4_b.avi
+
 ff "${SRC_LAVFI[@]}" -t 4 -c:v ffv1 -pix_fmt yuv420p10le ffv1_10bit.mkv
 ref ffv1_10bit container ffv1_10bit.mkv - -i ffv1_10bit.mkv
 # The same pictures without the first 3 frames (lossless): pairs with ffv1_10bit at offset -3.
@@ -132,6 +136,9 @@ ref raw_opengop_h264 rawes raw_opengop.h264 - -f h264 -i raw_opengop.h264
 ff "${SRC_LAVFI[@]}" -t 6 -c:v libx265 -preset ultrafast \
    -x265-params keyint=60:min-keyint=60:scenecut=0:open-gop=1:bframes=4:log-level=error -f hevc raw.h265
 ref raw_h265 rawes raw.h265 - -f hevc -i raw.h265
+
+ff "${SRC_LAVFI[@]}" -t 4 -c:v mpeg2video -bf 2 -g 24 -q:v 4 -f mpeg2video raw.m2v
+ref raw_m2v rawes raw.m2v - -f mpegvideo -i raw.m2v
 
 # --- raw video frames ----------------------------------------------------------------------
 for fmt in yuv420p nv12 yuv420p10le uyvy422; do

@@ -45,6 +45,8 @@ public:
             return false;
         m_demux = std::move(*demux);
         m_byteSeek = prefersByteSeek(m_demux.fmt.get());
+        // Raw demuxers make timestamps up (counting from wherever reading started).
+        m_ptsReliable = !(m_demux.fmt->iformat->flags & AVFMT_NOTIMESTAMPS);
         if (!openCodec(m_cfg.hw.policy != HwPolicy::Off, error))
             return false;
         m_pkt = ff::makePacket();
@@ -468,7 +470,7 @@ private:
         const intptr_t tag = reinterpret_cast<intptr_t>(m_frame->opaque);
         int32_t dec = tag > 0 ? int32_t(tag - 1) : -1;
         FrameIndexPtr idx = m_source.index();
-        if (idx && dec >= 0 && dec < idx->packetCount() && m_frame->pts != AV_NOPTS_VALUE &&
+        if (idx && dec >= 0 && dec < idx->packetCount() && m_frame->pts != AV_NOPTS_VALUE && m_ptsReliable &&
             idx->ordering() == FrameIndex::Ordering::Pts) {
             // Some decoders re-output an earlier picture with that picture's packet tag (AV1
             // show_existing_frame through hwaccel) while the pts is right: trust the pts then.
@@ -561,6 +563,7 @@ private:
     ff::PacketPtr m_pkt;
     ff::FramePtr m_frame;
     bool m_byteSeek = false;
+    bool m_ptsReliable = true;
     bool m_hasPending = false;
     bool m_inputEof = false;
     bool m_eof = false;

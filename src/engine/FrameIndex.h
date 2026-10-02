@@ -106,6 +106,8 @@ public:
 
     void add(const AVPacket& pkt);
     void add(const IndexPacket& p);
+    // Fills in a pts learned after the packet was added (anchors of MPEG-style streams).
+    void setPts(int32_t dec, int64_t pts);
     // Presentation time of the first frame the decoder outputs when starting at the beginning;
     // frames before it (leading pictures of an open first GOP) are hidden.
     void setFirstOutputPts(int64_t pts) { m_firstOutputPts = pts; }

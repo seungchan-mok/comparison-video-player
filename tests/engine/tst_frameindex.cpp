@@ -233,8 +233,10 @@ private slots:
             QVERIFY(idx->packet(sp.dec).isKey());
             QVERIFY(sp.dec <= idx->decodeFromPres(pres));
         }
-        // No timestamps: ordered by picture order count, timed by the bitstream's rate.
-        const bool noPts = fx->kind == QLatin1String("rawes") || name == QLatin1String("h264_b_avi");
+        // H.264/HEVC without timestamps: ordered by picture order count, timed by the
+        // bitstream's rate (MPEG-1/2/4 get their anchors' pts filled in instead).
+        const bool noPts = name == QLatin1String("raw_h264") || name == QLatin1String("raw_opengop_h264") ||
+                           name == QLatin1String("raw_h265") || name == QLatin1String("h264_b_avi");
         QCOMPARE(idx->ordering() == FrameIndex::Ordering::Poc, noPts);
         if (noPts) {
             QCOMPARE(idx->frameRate(), 30.0);
