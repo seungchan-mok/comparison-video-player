@@ -154,7 +154,11 @@ void MainWindow::createMenus()
 
 void MainWindow::applySettings(const AppSettings& s)
 {
+    const bool hwChanged = s.hwdec != m_settings.hwdec;
     m_settings = s;
+    m_player->engine().setHardware(s.hwConfig());
+    if (s.hwConfig().policy != HwPolicy::Off)
+        HwDevices::instance().warmUp();
     m_player->engine().setMemoryBudget(s.cacheBytes());
     m_player->setJumpSettings(s.jumps);
     m_controls->setJumpSettings(s.jumps);
@@ -163,6 +167,24 @@ void MainWindow::applySettings(const AppSettings& s)
         const QString keys = s.keys.text(a);
         act->setText(keys.isEmpty() ? tr(KeyMap::info(a).label) : tr(KeyMap::info(a).label) + QLatin1Char('\t') + keys);
     }
+    if (hwChanged)
+        reopenAll();
+}
+
+void MainWindow::overrideHardware(const HwConfig& hw) { m_player->engine().setHardware(hw); }
+
+void MainWindow::reopenAll()
+{
+    const int64_t pos = m_player->position();
+    for (int slot = 0; slot < Engine::kSlots; ++slot) {
+        if (!m_player->slotOpen(slot))
+            continue;
+        const QString path = QString::fromStdString(m_player->engine().info(slot).path);
+        m_player->close(slot);
+        QString err;
+        m_player->open(slot, path, &err);
+    }
+    m_player->seek(pos);
 }
 
 void MainWindow::overrideCacheBudget(size_t bytes) { m_player->engine().setMemoryBudget(bytes); }

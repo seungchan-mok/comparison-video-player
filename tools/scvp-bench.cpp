@@ -100,6 +100,7 @@ struct Options {
     double thinkMs = 33;
     double seconds = 10;
     int requestEvery = 1;
+    std::string hw = "gpu";
     bool json = false;
 };
 
@@ -134,7 +135,7 @@ int usage()
     std::fprintf(stderr,
                  "usage: scvp-bench FILE [--scenario all|open|seq|realtime|random|backstep|cached]\n"
                  "                  [--budget-mb N] [--jumps N] [--steps N] [--think-ms N] [--seconds N]\n"
-                 "                  [--request-every N] [--json]\n");
+                 "                  [--request-every N] [--hw gpu|cpu|cuda|vaapi|...] [--json]\n");
     return 2;
 }
 
@@ -167,6 +168,9 @@ int main(int argc, char** argv)
         } else if (a == "--request-every") {
             if (const char* v = next())
                 o.requestEvery = std::max(1, std::atoi(v));
+        } else if (a == "--hw") {
+            if (const char* v = next())
+                o.hw = v;
         } else if (a == "--json") {
             o.json = true;
         } else if (!a.empty() && a[0] == '-') {
@@ -180,6 +184,14 @@ int main(int argc, char** argv)
     ff::installLogCallback(AV_LOG_ERROR);
 
     Engine engine;
+    HwConfig hw;
+    if (o.hw == "cpu" || o.hw == "off") {
+        hw.policy = HwPolicy::Off;
+    } else if (o.hw != "gpu") {
+        hw.policy = HwPolicy::Device;
+        hw.device = av_hwdevice_find_type_by_name(o.hw.c_str());
+    }
+    engine.setHardware(hw);
     if (o.budgetMb)
         engine.setMemoryBudget(o.budgetMb << 20);
     Waiter waiter(engine);
@@ -206,10 +218,10 @@ int main(int argc, char** argv)
     }
     const VideoInfo info = engine.info(0);
     if (!o.json)
-        std::printf("%s: %dx%d %s %s, %d frames @ %.3f fps, frame %zu bytes, cache capacity %d frames (%.0f MB budget)\n",
+        std::printf("%s: %dx%d %s %s, %d frames @ %.3f fps, frame %zu bytes, cache capacity %d frames (%.0f MB budget), decoder %s\n",
                     o.file.c_str(), info.width, info.height, info.codecName.c_str(),
                     av_get_pix_fmt_name(first->format()), n, fps, first->bytes, engine.capacityFrames(0),
-                    double(engine.memoryBudget()) / (1 << 20));
+                    double(engine.memoryBudget()) / (1 << 20), first->hardware ? "hardware" : "software");
     if (want(o, "open")) {
         char h[128], j[128];
         std::snprintf(h, sizeof(h), "first frame %.1f ms, complete index %.1f ms", firstFrameMs, indexMs);

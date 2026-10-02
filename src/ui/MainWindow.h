@@ -30,6 +30,8 @@ public:
     void showSettings();
     void applySettings(const AppSettings& s);
     void overrideCacheBudget(size_t bytes);  // command line: this run only
+    void overrideHardware(const HwConfig& hw);
+    void reopenAll();  // after a decoding change: same files, same frame
 
 protected:
     void dragEnterEvent(QDragEnterEvent* e) override;

@@ -59,6 +59,8 @@ int main(int argc, char* argv[])
     parser.addPositionalArgument(QStringLiteral("A"), QStringLiteral("Video to open (slot A)"), QStringLiteral("[A]"));
     QCommandLineOption cacheMb(QStringLiteral("cache-mb"), QStringLiteral("Decoded frame cache budget for this run (MB)."), QStringLiteral("MB"));
     parser.addOption(cacheMb);
+    QCommandLineOption hwdec(QStringLiteral("hwdec"), QStringLiteral("Decoding for this run: gpu (default), cpu, or a device (cuda, vaapi, d3d11va, videotoolbox)."), QStringLiteral("mode"));
+    parser.addOption(hwdec);
     // Deterministic end-to-end checks on a virtual display (scripts/xvfb-run.sh).
     QCommandLineOption debugGrab(QStringLiteral("debug-grab"), QStringLiteral("Save the video view to PNG, then quit."), QStringLiteral("png"));
     QCommandLineOption debugAfter(QStringLiteral("debug-after"), QStringLiteral("Milliseconds before --debug-grab (default 1000)."), QStringLiteral("ms"), QStringLiteral("1000"));
@@ -79,6 +81,13 @@ int main(int argc, char* argv[])
     scvp::ui::MainWindow window;
     if (parser.isSet(cacheMb))
         window.overrideCacheBudget(size_t(parser.value(cacheMb).toULongLong()) << 20);
+    if (parser.isSet(hwdec)) {
+        bool ok = false;
+        const scvp::HwConfig hw = scvp::ui::AppSettings::parseHwdec(parser.value(hwdec), &ok);
+        if (!ok)
+            std::fprintf(stderr, "unknown --hwdec value '%s', using gpu\n", qPrintable(parser.value(hwdec)));
+        window.overrideHardware(hw);
+    }
     if (parser.isSet(debugSize)) {
         const QStringList wh = parser.value(debugSize).split(QLatin1Char('x'));
         if (wh.size() == 2)

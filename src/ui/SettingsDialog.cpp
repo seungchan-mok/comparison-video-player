@@ -39,6 +39,16 @@ SettingsDialog::SettingsDialog(const AppSettings& current, std::function<std::pa
     m_cacheMb->setEnabled(current.cacheMb != 0);
     m_cacheInfo = new QLabel;
     m_cacheInfo->setWordWrap(true);
+    m_hwdec = new QComboBox;
+    m_hwdec->addItem(tr("GPU first (H.264, HEVC, VP8/9, AV1; bit-exact)"), QStringLiteral("gpu"));
+    m_hwdec->addItem(tr("CPU only"), QStringLiteral("cpu"));
+    for (AVHWDeviceType t = av_hwdevice_iterate_types(AV_HWDEVICE_TYPE_NONE); t != AV_HWDEVICE_TYPE_NONE;
+         t = av_hwdevice_iterate_types(t))
+        m_hwdec->addItem(tr("Always %1 (any codec it supports)").arg(QString::fromLatin1(HwDevices::name(t))),
+                         QString::fromLatin1(HwDevices::name(t)));
+    const int hwIndex = m_hwdec->findData(current.hwdec);
+    m_hwdec->setCurrentIndex(hwIndex >= 0 ? hwIndex : 0);
+    memForm->addRow(tr("Decoding"), m_hwdec);
     memForm->addRow(tr("Decoded frame cache"), m_autoCache);
     memForm->addRow(QString(), m_cacheMb);
     memForm->addRow(QString(), m_cacheInfo);
@@ -49,7 +59,7 @@ SettingsDialog::SettingsDialog(const AppSettings& current, std::function<std::pa
         updateBudgetText();
     });
     connect(m_cacheMb, &QSpinBox::valueChanged, this, &SettingsDialog::updateBudgetText);
-    tabs->addTab(mem, tr("Memory"));
+    tabs->addTab(mem, tr("Performance"));
 
     // --- Navigation ------------------------------------------------------------------------
     auto* nav = new QWidget;
@@ -134,6 +144,7 @@ AppSettings SettingsDialog::result() const
 {
     AppSettings s = m_settings;
     s.cacheMb = m_autoCache->isChecked() ? 0 : size_t(m_cacheMb->value());
+    s.hwdec = m_hwdec->currentData().toString();
     s.jumps.small = m_jumpSmall->value();
     s.jumps.large = m_jumpLarge->value();
     s.jumps.inFrames = m_jumpUnit->currentIndex() == 1;

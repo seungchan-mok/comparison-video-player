@@ -31,6 +31,7 @@ private:
 
     AppSettings m_settings;
     std::function<std::pair<size_t, int>()> m_frameInfo;
+    QComboBox* m_hwdec;
     QCheckBox* m_autoCache;
     QSpinBox* m_cacheMb;
     QLabel* m_cacheInfo;

@@ -90,6 +90,8 @@ QStringList HudOverlay::lines() const
             frameLine += QStringLiteral("  decoding...");
         }
         out << frameLine;
+        out << QStringLiteral("   decoder %1").arg(st.hardwareDevice.empty() ? QStringLiteral("software")
+                                                                       : QString::fromStdString(st.hardwareDevice));
         out << QStringLiteral("   cache %1 frames %2 MB / %3 MB, %4 decoded, %5 seeks%6")
                    .arg(st.cachedFrames)
                    .arg(st.cachedBytes >> 20)
