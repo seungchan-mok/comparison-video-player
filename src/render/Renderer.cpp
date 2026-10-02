@@ -67,6 +67,11 @@ bool Renderer::prepare(Slot& s, const FramePtr& frame, const ColorOverrides& ove
                 }
             }
         }
+    } else if (!PixelLayout::of(frame->format())) {
+        if (uploadConverted(s, *frame)) {
+            source = &s.upload;
+            s.path = UploadPath::Upload;
+        }
     } else if (s.upload.update(m_gl, *frame)) {
         source = &s.upload;
         s.path = UploadPath::Upload;
@@ -98,6 +103,30 @@ bool Renderer::prepare(Slot& s, const FramePtr& frame, const ColorOverrides& ove
         m_timings.uploadBytes += s.upload.lastUploadBytes();
     m_timings.converted = true;
     return true;
+}
+
+// Pixel formats without a shader path (palettes, big-endian, packed 10-bit, float, ...) go
+// through swscale into the closest supported format: same family and depth, point sampling, so
+// values are kept wherever the target can hold them.
+bool Renderer::uploadConverted(Slot& s, const Frame& frame)
+{
+    const AVPixelFormat target = PixelLayout::fallbackFor(frame.format());
+    if (target == AV_PIX_FMT_NONE)
+        return false;
+    s.sws = sws_getCachedContext(s.sws, frame.width(), frame.height(), frame.format(), frame.width(), frame.height(), target,
+                                 SWS_POINT | SWS_BITEXACT | SWS_ACCURATE_RND | SWS_FULL_CHR_H_INT | SWS_FULL_CHR_H_INP, nullptr,
+                                 nullptr, nullptr);
+    if (!s.sws)
+        return false;
+    Frame tmp;
+    tmp.av = av_frame_alloc();
+    tmp.av->format = target;
+    tmp.av->width = frame.width();
+    tmp.av->height = frame.height();
+    if (av_frame_get_buffer(tmp.av, 64) < 0 || sws_scale_frame(s.sws, tmp.av, frame.av) < 0)
+        return false;
+    av_frame_copy_props(tmp.av, frame.av);
+    return s.upload.update(m_gl, tmp);
 }
 
 void Renderer::drawPane(int mode, const Slot& a, const Slot& b, const RenderState& state, QRect pane)

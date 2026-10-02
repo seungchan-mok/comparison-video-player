@@ -66,7 +66,8 @@ ColorParams ColorParams::resolve(const PixelLayout& layout, AVColorSpace colorsp
     const double maxCode = double((1u << n) - 1u);
     const double k = std::ldexp(1.0, n - 8);  // 2^(N-8): scales the 8-bit range constants
 
-    AVColorRange rng = overrides.range ? *overrides.range : range;
+    // Sensor mosaics are linear full-range data whatever the container says.
+    AVColorRange rng = overrides.range ? *overrides.range : layout.layout == Layout::Bayer ? AVCOL_RANGE_JPEG : range;
     if (rng != AVCOL_RANGE_MPEG && rng != AVCOL_RANGE_JPEG)
         rng = layout.fullRangeDefault ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
     p.rangeUsed = rng;

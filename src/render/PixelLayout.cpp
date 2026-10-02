@@ -1,5 +1,7 @@
 #include "render/PixelLayout.h"
 
+#include <algorithm>
+
 namespace scvp::render {
 
 int bytesPerTexel(TexFormat f)
@@ -53,6 +55,27 @@ bool isBigEndian(const AVPixFmtDescriptor* d) { return d->flags & AV_PIX_FMT_FLA
 
 std::optional<PixelLayout> PixelLayout::of(AVPixelFormat format)
 {
+    // Bayer mosaics (FFmpeg's descriptors give them odd per-component depths).
+    static const struct {
+        AVPixelFormat f;
+        int pattern;
+        int depth;
+    } bayer[] = {{AV_PIX_FMT_BAYER_RGGB8, 0, 8},     {AV_PIX_FMT_BAYER_BGGR8, 1, 8},     {AV_PIX_FMT_BAYER_GRBG8, 2, 8},
+                 {AV_PIX_FMT_BAYER_GBRG8, 3, 8},     {AV_PIX_FMT_BAYER_RGGB16LE, 0, 16}, {AV_PIX_FMT_BAYER_BGGR16LE, 1, 16},
+                 {AV_PIX_FMT_BAYER_GRBG16LE, 2, 16}, {AV_PIX_FMT_BAYER_GBRG16LE, 3, 16}};
+    for (const auto& b : bayer)
+        if (b.f == format) {
+            PixelLayout l;
+            l.format = format;
+            l.layout = Layout::Bayer;
+            l.planes = 1;
+            l.plane[0] = {b.depth > 8 ? TexFormat::R16UI : TexFormat::R8UI, 0, 0, false};
+            l.bitDepth = b.depth;
+            l.mask = (1u << b.depth) - 1u;
+            l.swizzle[0] = b.pattern;
+            l.fullRangeDefault = true;
+            return l;
+        }
     const AVPixFmtDescriptor* d = av_pix_fmt_desc_get(format);
     if (!d || (d->flags & (AV_PIX_FMT_FLAG_HWACCEL | AV_PIX_FMT_FLAG_PAL | AV_PIX_FMT_FLAG_BITSTREAM |
                            AV_PIX_FMT_FLAG_BAYER | AV_PIX_FMT_FLAG_FLOAT)))
@@ -166,6 +189,61 @@ std::optional<PixelLayout> PixelLayout::of(AVPixelFormat format)
         return l;
     }
     return std::nullopt;
+}
+
+AVPixelFormat PixelLayout::fallbackFor(AVPixelFormat format)
+{
+    const AVPixFmtDescriptor* d = av_pix_fmt_desc_get(format);
+    if (!d || (d->flags & AV_PIX_FMT_FLAG_HWACCEL))
+        return AV_PIX_FMT_NONE;
+    if (of(format))
+        return format;
+    const bool rgb = (d->flags & (AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_PAL | AV_PIX_FMT_FLAG_BAYER)) != 0;
+    const bool gray = !rgb && d->nb_components <= 2;
+    int depth = 0;
+    for (int c = 0; c < d->nb_components; ++c)
+        depth = std::max(depth, int(d->comp[c].depth));
+    if (d->flags & AV_PIX_FMT_FLAG_PAL)
+        depth = 8;
+    if (d->flags & AV_PIX_FMT_FLAG_FLOAT)
+        depth = 16;
+    depth = std::min(depth, 16);
+    // Same family, the smallest supported depth >= the source's, same chroma subsampling for YUV;
+    // planar layouts first.
+    AVPixelFormat best = AV_PIX_FMT_NONE;
+    int bestScore = 1 << 30;
+    for (const AVPixFmtDescriptor* c = av_pix_fmt_desc_next(nullptr); c; c = av_pix_fmt_desc_next(c)) {
+        const AVPixelFormat f = av_pix_fmt_desc_get_id(c);
+        const auto l = of(f);
+        if (!l || l->layout == Layout::Bayer)
+            continue;
+        const bool family = rgb ? l->isRgb() : gray ? l->isGray() : l->isYuv();
+        if (!family || l->bitDepth < depth)
+            continue;
+        if (!rgb && !gray && (l->chromaShiftX != d->log2_chroma_w || l->chromaShiftY != d->log2_chroma_h))
+            continue;
+        const bool alpha = c->flags & AV_PIX_FMT_FLAG_ALPHA;
+        // Keep the source's arrangement where possible (swscale converts like for like exactly):
+        // packed RGB stays packed, semi-planar YUV semi-planar, everything else planar.
+        const bool srcPlanar = d->flags & AV_PIX_FMT_FLAG_PLANAR;
+        const bool srcSemi = srcPlanar && d->nb_components >= 3 && d->comp[1].plane == d->comp[2].plane;
+        bool match;
+        if (rgb)
+            match = (l->layout == Layout::PlanarRgb) == srcPlanar;
+        else if (gray)
+            match = true;
+        else
+            match = srcSemi ? l->layout == Layout::SemiYuv : l->layout == Layout::PlanarYuv;
+        const int score = (l->bitDepth - depth) * 8 + (match ? 0 : 2) + (alpha ? 1 : 0) + (l->shift ? 4 : 0) +
+                          (l->layout == Layout::PackedRgb && componentCount(l->plane[0].format) == 4 ? 1 : 0);
+        if (score < bestScore) {
+            bestScore = score;
+            best = f;
+        }
+    }
+    if (best == AV_PIX_FMT_NONE)
+        best = rgb || gray ? AV_PIX_FMT_RGB48LE : AV_PIX_FMT_YUV444P16LE;
+    return best;
 }
 
 } // namespace scvp::render

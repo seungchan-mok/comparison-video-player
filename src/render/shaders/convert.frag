@@ -1,5 +1,5 @@
 // Source planes -> RGB at source resolution, one fragment per source pixel. Exactly one of
-// PLANAR_YUV, SEMI_YUV, PACKED_422, PLANAR_RGB, PACKED_RGB, GRAY is defined; EMIT_CODES adds a
+// PLANAR_YUV, SEMI_YUV, PACKED_422, PLANAR_RGB, PACKED_RGB, GRAY, BAYER is defined; EMIT_CODES adds a
 // second output with the raw code values (for the YUV value display and the inspector).
 // Chroma is sampled nearest by default (each pixel uses the chroma sample covering it), so every
 // output value follows from exact integer codes; ColorParams::toRgb() mirrors this on the CPU.
@@ -53,6 +53,37 @@ vec2 linearChroma(ivec2 p)
 }
 #endif
 
+#ifdef BAYER
+// Bilinear demosaic. Edges reflect by whole CFA periods' parity (-1 -> 1, w -> w - 2) so a
+// neighbour always has the colour the formula expects.
+ivec2 reflectEdge(ivec2 q, ivec2 size)
+{
+    q = abs(q);
+    return min(q, 2 * (size - 1) - q);
+}
+
+float mosaic(ivec2 q, ivec2 size) { return float(C(texelFetch(t0, reflectEdge(q, size), 0).r)); }
+
+vec3 demosaic(ivec2 p)
+{
+    ivec2 size = textureSize(t0, 0);
+    // Position of R in the 2x2 cell for RGGB, BGGR, GRBG, GBRG.
+    ivec2 r = swz.x == 0 ? ivec2(0, 0) : swz.x == 1 ? ivec2(1, 1) : swz.x == 2 ? ivec2(1, 0) : ivec2(0, 1);
+    ivec2 c = p & 1;
+    float v = mosaic(p, size);
+    float cross = (mosaic(p + ivec2(1, 0), size) + mosaic(p - ivec2(1, 0), size) + mosaic(p + ivec2(0, 1), size) + mosaic(p - ivec2(0, 1), size)) * 0.25;
+    float diag = (mosaic(p + ivec2(1, 1), size) + mosaic(p - ivec2(1, 1), size) + mosaic(p + ivec2(1, -1), size) + mosaic(p + ivec2(-1, 1), size)) * 0.25;
+    float horiz = (mosaic(p + ivec2(1, 0), size) + mosaic(p - ivec2(1, 0), size)) * 0.5;
+    float vert = (mosaic(p + ivec2(0, 1), size) + mosaic(p - ivec2(0, 1), size)) * 0.5;
+    if (c == r)
+        return vec3(v, cross, diag);
+    if (c == (r ^ 1))
+        return vec3(diag, cross, v);
+    // Green: in an R row, R is left/right and B above/below; in a B row the other way round.
+    return c.y == r.y ? vec3(horiz, v, vert) : vec3(vert, v, horiz);
+}
+#endif
+
 void main()
 {
     ivec2 p = ivec2(gl_FragCoord.xy);  // row 0 = top image row, as uploaded
@@ -75,10 +106,13 @@ void main()
 #elif defined(PACKED_RGB)
     uvec4 q = texelFetch(t0, p, 0);
     k = uvec3(C(q[swz.x]), C(q[swz.y]), C(q[swz.z]));
-#elif defined(GRAY)
+#elif defined(GRAY) || defined(BAYER)
     k = uvec3(C(texelFetch(t0, p, 0).r));
 #endif
     vec3 kf = vec3(k);
+#ifdef BAYER
+    kf = demosaic(p);
+#endif
 #ifdef CHROMA_LINEAR
     kf.yz = linearChroma(p);
 #endif

@@ -74,7 +74,8 @@ private slots:
 
     void unsupportedFormats()
     {
-        for (AVPixelFormat f : {AV_PIX_FMT_PAL8, AV_PIX_FMT_CUDA, AV_PIX_FMT_RGB565LE, AV_PIX_FMT_BAYER_RGGB8,
+        // (Converted with swscale before upload, see tst_formats.)
+        for (AVPixelFormat f : {AV_PIX_FMT_PAL8, AV_PIX_FMT_CUDA, AV_PIX_FMT_RGB565LE, AV_PIX_FMT_BAYER_RGGB16BE,
                                 AV_PIX_FMT_YUV420P10BE, AV_PIX_FMT_RGB48BE, AV_PIX_FMT_MONOBLACK, AV_PIX_FMT_YA8,
                                 AV_PIX_FMT_GRAYF32LE})
             QVERIFY2(!PixelLayout::of(f), av_get_pix_fmt_name(f));

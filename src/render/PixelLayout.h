@@ -16,6 +16,7 @@ enum class Layout : uint8_t {
     PlanarRgb,  // G, B, R planes (FFmpeg GBRP order)
     PackedRgb,  // RGB24 / RGBA / BGRA / RGB48 ...
     Gray,
+    Bayer,      // one mosaic plane; swizzle[0] = CFA pattern (0 RGGB, 1 BGGR, 2 GRBG, 3 GBRG)
 };
 
 // Integer texture formats: shaders read exact code values with texelFetch on usampler2D.
@@ -48,13 +49,16 @@ struct PixelLayout {
     bool fullRangeDefault = false;  // yuvj*, RGB and gray formats
 
     bool isYuv() const { return layout == Layout::PlanarYuv || layout == Layout::SemiYuv || layout == Layout::Packed422; }
-    bool isRgb() const { return layout == Layout::PlanarRgb || layout == Layout::PackedRgb; }
+    bool isRgb() const { return layout == Layout::PlanarRgb || layout == Layout::PackedRgb || layout == Layout::Bayer; }
     bool isGray() const { return layout == Layout::Gray; }
     int planeWidth(int i, int width) const;
     int planeHeight(int i, int height) const;
 
     // Supported formats map directly; everything else must be converted first (nullopt).
     static std::optional<PixelLayout> of(AVPixelFormat format);
+    // A supported format that holds the same values (same family, depth and subsampling where
+    // one exists) for converting an unsupported one with swscale; NONE if there is none.
+    static AVPixelFormat fallbackFor(AVPixelFormat format);
 };
 
 } // namespace scvp::render

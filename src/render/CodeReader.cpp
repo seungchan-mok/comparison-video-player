@@ -42,7 +42,8 @@ std::array<uint32_t, 3> readCodes(const AVFrame* f, const PixelLayout& l, int x,
         return {C(sample(f, 0, x, y, bpc, comps, l.swizzle[0])), C(sample(f, 0, x, y, bpc, comps, l.swizzle[1])),
                 C(sample(f, 0, x, y, bpc, comps, l.swizzle[2]))};
     }
-    case Layout::Gray: {
+    case Layout::Gray:
+    case Layout::Bayer: {
         const uint32_t v = C(sample(f, 0, x, y, bpc, 1, 0));
         return {v, v, v};
     }

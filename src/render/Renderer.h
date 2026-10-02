@@ -83,10 +83,12 @@ private:
         ColorParams color;
         ColorOverrides overrides;
         bool codes = false;             // the converter also wrote the source codes
+        SwsContext* sws = nullptr;      // formats the shaders do not read: converted first
         bool gray = false;
         bool valid = false;
     };
     bool prepare(Slot& s, const FramePtr& frame, const ColorOverrides& overrides, bool codes);
+    bool uploadConverted(Slot& s, const Frame& frame);
     // mode: 0 = slot `a` only, 1 = wipe, 2 = difference (as in display.frag).
     void drawPane(int mode, const Slot& a, const Slot& b, const RenderState& state, QRect pane);
 

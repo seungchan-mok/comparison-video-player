@@ -17,6 +17,7 @@ const char* layoutDefine(Layout l)
     case Layout::PlanarRgb: return "PLANAR_RGB";
     case Layout::PackedRgb: return "PACKED_RGB";
     case Layout::Gray: return "GRAY";
+    case Layout::Bayer: return "BAYER";
     }
     return "PLANAR_YUV";
 }
