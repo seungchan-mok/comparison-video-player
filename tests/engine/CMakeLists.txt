@@ -10,3 +10,4 @@ scvp_add_test(tst_engine tst_engine.cpp
               shrinkingBudgetReleasesMemory twoVideosShareTheBudget closeWhileDecoding)
 scvp_add_test(tst_playbackcontroller tst_playbackcontroller.cpp)
 scvp_add_test(tst_hwdecode tst_hwdecode.cpp FUNCTIONS sequential randomAccess fallbackToSoftware)
+scvp_add_test(tst_gpuframes tst_gpuframes.cpp)

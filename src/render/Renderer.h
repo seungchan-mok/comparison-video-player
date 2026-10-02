@@ -2,6 +2,7 @@
 
 #include "engine/Frame.h"
 #include "render/ColorParams.h"
+#include "render/CudaInteropSource.h"
 #include "render/RgbConverter.h"
 #include "render/ShaderLibrary.h"
 #include "render/TextureSource.h"
@@ -28,6 +29,7 @@ struct RenderTimings {
     double uploadMs = 0;
     double convertMs = 0;
     size_t uploadBytes = 0;
+    bool zeroCopy = false;   // a GPU-resident frame went to the textures without the CPU
     bool converted = false;  // a new frame was uploaded and converted this time
 };
 
@@ -50,7 +52,9 @@ public:
 private:
     struct Slot {
         CpuUploadSource upload;
+        CudaInteropSource interop;
         RgbConverter conv;
+        bool lastWasGpu = false;
         const Frame* shown = nullptr;   // identity of the converted frame
         FramePtr hold;                  // keeps it alive while its pixels are on the GPU
         ColorParams color;

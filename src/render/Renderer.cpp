@@ -1,5 +1,8 @@
 #include "render/Renderer.h"
 
+#include "engine/FrameAllocator.h"
+#include "engine/GpuFrame.h"
+
 #include <chrono>
 #include <cmath>
 
@@ -18,6 +21,7 @@ void Renderer::release()
         return;
     for (Slot& s : m_slots) {
         s.upload.release(m_gl);
+        s.interop.release(m_gl);
         s.conv.release(m_gl);
         s.hold.reset();
         s.shown = nullptr;
@@ -42,15 +46,34 @@ bool Renderer::prepare(Slot& s, const FramePtr& frame, const ColorOverrides& ove
     if (s.valid && s.shown == frame.get() && sameColor)
         return true;
     const auto t0 = std::chrono::steady_clock::now();
-    if (!s.upload.update(m_gl, *frame)) {
+    const TextureSource* source = nullptr;
+    if (frame->location == FrameLocation::Cuda) {
+        if (s.interop.update(m_gl, *frame)) {
+            source = &s.interop;
+            m_timings.zeroCopy = true;
+        } else if (frame->gpu && frame->gpu->pool) {
+            // No interop with this GPU: bring the pixels to system memory once.
+            FramePool tmp("interop-fallback");
+            Frame cpu;
+            cpu.av = frame->gpu->pool->download(*frame->gpu, tmp);
+            if (cpu.av) {
+                av_frame_copy_props(cpu.av, frame->av);
+                if (s.upload.update(m_gl, cpu))
+                    source = &s.upload;
+            }
+        }
+    } else if (s.upload.update(m_gl, *frame)) {
+        source = &s.upload;
+    }
+    if (!source) {
         m_error = QStringLiteral("cannot display pixel format %1").arg(QString::fromLatin1(av_get_pix_fmt_name(frame->format())));
         s.valid = false;
         return false;
     }
     const auto t1 = std::chrono::steady_clock::now();
     s.overrides = overrides;
-    s.color = ColorParams::resolve(s.upload.layout(), frame->av->colorspace, frame->av->color_range, frame->height(), overrides);
-    if (!s.conv.convert(m_gl, m_shaders, s.upload, s.color, false)) {
+    s.color = ColorParams::resolve(source->layout(), frame->av->colorspace, frame->av->color_range, frame->height(), overrides);
+    if (!s.conv.convert(m_gl, m_shaders, *source, s.color, false)) {
         m_error = s.conv.error();
         s.valid = false;
         return false;
@@ -61,7 +84,8 @@ bool Renderer::prepare(Slot& s, const FramePtr& frame, const ColorOverrides& ove
     s.valid = true;
     m_timings.uploadMs += std::chrono::duration<double, std::milli>(t1 - t0).count();
     m_timings.convertMs += std::chrono::duration<double, std::milli>(t2 - t1).count();
-    m_timings.uploadBytes += s.upload.lastUploadBytes();
+    if (source == &s.upload)
+        m_timings.uploadBytes += s.upload.lastUploadBytes();
     m_timings.converted = true;
     return true;
 }

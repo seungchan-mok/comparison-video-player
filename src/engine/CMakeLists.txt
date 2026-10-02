@@ -1,6 +1,7 @@
 find_package(Threads REQUIRED)
 
 add_library(scvp_engine STATIC
+    CudaApi.h CudaApi.cpp
     FfmpegCompat.h FfmpegCompat.cpp
     Frame.h
     FrameAllocator.h FrameAllocator.cpp
@@ -10,6 +11,7 @@ add_library(scvp_engine STATIC
     Engine.h Engine.cpp
     FFmpegSource.h FFmpegSource.cpp
     FrameIndex.h FrameIndex.cpp
+    GpuFrame.h GpuFrame.cpp
     HwDevice.h HwDevice.cpp
     IndexScanner.h IndexScanner.cpp
     Log.h Log.cpp
@@ -22,5 +24,5 @@ add_library(scvp_engine STATIC
 add_library(scvp::engine ALIAS scvp_engine)
 target_include_directories(scvp_engine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(scvp_engine
-    PUBLIC scvp::ffmpeg Threads::Threads
+    PUBLIC scvp::ffmpeg Threads::Threads ${CMAKE_DL_LIBS}
     PRIVATE scvp::compile_options)

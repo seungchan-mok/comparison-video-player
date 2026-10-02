@@ -1,6 +1,7 @@
 add_library(scvp_render STATIC
     CodeReader.h CodeReader.cpp
     ColorParams.h ColorParams.cpp
+    CudaInteropSource.h CudaInteropSource.cpp
     GlCommon.h
     PixelLayout.h PixelLayout.cpp
     Renderer.h Renderer.cpp
