@@ -5,11 +5,14 @@ add_library(scvp_engine STATIC
     Frame.h
     FrameAllocator.h FrameAllocator.cpp
     FrameCache.h FrameCache.cpp
+    DecodeLane.h DecodeLane.cpp
     Demux.h Demux.cpp
+    Engine.h Engine.cpp
     FFmpegSource.h FFmpegSource.cpp
     FrameIndex.h FrameIndex.cpp
     IndexScanner.h IndexScanner.cpp
     Log.h Log.cpp
+    Mailbox.h
     Platform.h Platform.cpp
     PrefetchPlanner.h PrefetchPlanner.cpp
     VideoSource.h

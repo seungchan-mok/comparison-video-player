@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <set>
 #include <thread>
 
 namespace scvp {
@@ -125,6 +126,7 @@ public:
     }
 
     Position position() const override { return {m_nextDec, m_lastPres, m_eof}; }
+    bool wasSkipped(int32_t dec) const override { return m_skipped.count(dec) != 0; }
     int indexMismatches() const override { return m_mismatches; }
 
 private:
@@ -145,6 +147,7 @@ private:
         m_eof = false;
         m_lastPres = -1;
         m_nextDec = -1;
+        m_skipped.clear();
     }
 
     bool rewindToStart()
@@ -235,6 +238,12 @@ private:
         }
         m_pkt->opaque = reinterpret_cast<void*>(intptr_t(m_pendingDec) + 1);
         m_ctx->skip_frame = skipFor(m_pendingDec, hints);
+        if (m_ctx->skip_frame != AVDISCARD_DEFAULT && m_pendingDec >= 0) {
+            m_skipped.insert(m_pendingDec);
+            // Only recent packets matter for "can continuing still produce frame X".
+            while (!m_skipped.empty() && *m_skipped.begin() < m_pendingDec - 4096)
+                m_skipped.erase(m_skipped.begin());
+        }
         const int ret = avcodec_send_packet(m_ctx.get(), m_pkt.get());
         if (ret == AVERROR(EAGAIN))
             return true;  // keep the packet; output must be drained first
@@ -269,7 +278,7 @@ private:
 
     AVDiscard skipFor(int32_t dec, const DecodeHints& hints) const
     {
-        if (hints.skipNonRefBelow < 0 || dec < 0)
+        if ((hints.skipNonRefBelow < 0 && !hints.frameNeeded) || dec < 0)
             return AVDISCARD_DEFAULT;
         FrameIndexPtr idx = m_source.index();
         if (!idx || dec >= idx->packetCount())
@@ -277,7 +286,9 @@ private:
         const IndexPacket& ip = idx->packet(dec);
         if (ip.isKey())
             return AVDISCARD_DEFAULT;
-        const bool unneeded = !ip.shown() || (ip.pres >= 0 && ip.pres < hints.skipNonRefBelow);
+        bool unneeded = !ip.shown();
+        if (!unneeded && ip.pres >= 0)
+            unneeded = hints.frameNeeded ? !(*hints.frameNeeded)(ip.pres) : ip.pres < hints.skipNonRefBelow;
         return unneeded ? AVDISCARD_NONREF : AVDISCARD_DEFAULT;
     }
 
@@ -345,6 +356,7 @@ private:
     int32_t m_nextDec = 0;
     int32_t m_lastPres = -1;
     int m_mismatches = 0;
+    std::set<int32_t> m_skipped;  // decode indices fed with NONREF since the last seek
 };
 
 VideoInfo describe(const std::string& path, const Demuxer& d)
@@ -404,11 +416,21 @@ FFmpegSource::~FFmpegSource()
 
 void FFmpegSource::onSnapshot(FrameIndexPtr idx)
 {
+    std::function<void()> listener;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_index = std::move(idx);
+        listener = m_listener;
     }
     m_indexChanged.notify_all();
+    if (listener)
+        listener();
+}
+
+void FFmpegSource::setIndexListener(std::function<void()> listener)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_listener = std::move(listener);
 }
 
 FrameIndexPtr FFmpegSource::index() const

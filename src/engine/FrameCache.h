@@ -72,6 +72,8 @@ public:
     // End (inclusive) of the run of missing frames starting at `from`, not beyond `limit`.
     int32_t missingRunEnd(int32_t from, int32_t limit) const;
     int32_t countCached(int32_t first, int32_t last) const;
+    // Highest cached frame number in [first, last], -1 if none.
+    int32_t lastCached(int32_t first, int32_t last) const;
     // Cost of the least needed cached frame (what a new frame must beat when full).
     double worstCost() const;
 

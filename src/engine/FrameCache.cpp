@@ -267,6 +267,16 @@ int32_t FrameCache::countCached(int32_t first, int32_t last) const
     return n;
 }
 
+int32_t FrameCache::lastCached(int32_t first, int32_t last) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_frames.upper_bound(last);
+    if (it == m_frames.begin())
+        return -1;
+    --it;
+    return it->first >= first ? it->first : -1;
+}
+
 double FrameCache::worstCost() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);

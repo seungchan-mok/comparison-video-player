@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -47,6 +48,9 @@ struct DecodeHints {
     // Non-key packets whose frame number is below this are decoded with AVDISCARD_NONREF:
     // frames nobody needs are skipped, references are still decoded. -1 disables.
     int32_t skipNonRefBelow = -1;
+    // Finer alternative (takes precedence): non-key packets whose frame is not needed are
+    // decoded with AVDISCARD_NONREF.
+    const std::function<bool(int32_t frame)>* frameNeeded = nullptr;
     // Decoding stops with Cancelled as soon as *cancel != generation.
     const std::atomic<uint64_t>* cancel = nullptr;
     uint64_t generation = 0;
@@ -71,6 +75,9 @@ public:
     // Next frame in presentation order (frames that are never shown are skipped).
     virtual DecodeStatus next(FramePtr& out, const DecodeHints& hints) = 0;
     virtual Position position() const = 0;
+    // Whether the packet with this decode index was fed with AVDISCARD_NONREF since the last
+    // seek (its frame will not come out by continuing).
+    virtual bool wasSkipped(int32_t dec) const = 0;
     // Frames whose number contradicted the index since the session was opened.
     virtual int indexMismatches() const = 0;
 };
@@ -86,6 +93,8 @@ public:
     virtual std::unique_ptr<IDecodeSession> openSession(const SessionConfig& cfg, std::string* error) = 0;
     // Blocks until the index is complete (or timeout); for tests and tools.
     virtual bool waitForIndex(int timeoutMs) = 0;
+    // Called (from the scanner thread) whenever a newer index snapshot is published.
+    virtual void setIndexListener(std::function<void()> listener) = 0;
 };
 
 // Opens a media file, picking the source implementation from its type.

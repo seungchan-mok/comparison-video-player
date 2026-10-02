@@ -22,6 +22,7 @@ public:
     SourceCaps caps() const override { return {}; }
     std::unique_ptr<IDecodeSession> openSession(const SessionConfig& cfg, std::string* error) override;
     bool waitForIndex(int timeoutMs) override;
+    void setIndexListener(std::function<void()> listener) override;
 
 private:
     FFmpegSource() = default;
@@ -34,6 +35,7 @@ private:
     mutable std::mutex m_mutex;
     std::condition_variable m_indexChanged;
     FrameIndexPtr m_index;
+    std::function<void()> m_listener;
 };
 
 } // namespace scvp
