@@ -40,3 +40,4 @@ endfunction()
 
 add_subdirectory(engine)
 add_subdirectory(render)
+add_subdirectory(e2e)

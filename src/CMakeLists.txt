@@ -1,13 +1,13 @@
 add_subdirectory(engine)
 add_subdirectory(render)
+add_subdirectory(ui)
 
 qt_add_executable(scvp WIN32 MACOSX_BUNDLE
     main.cpp
 )
 target_link_libraries(scvp PRIVATE
     scvp::compile_options
-    scvp::engine
-    Qt6::Widgets
+    scvp::ui
 )
 set_target_properties(scvp PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "SCVP"
