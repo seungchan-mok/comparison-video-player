@@ -47,6 +47,7 @@ private:
     void updateTitle();
     void createMenus();
     QAction* playerAction(QMenu* menu, Action a);
+    void createColorMenu();
 
     VideoView* m_view;
     Player* m_player;

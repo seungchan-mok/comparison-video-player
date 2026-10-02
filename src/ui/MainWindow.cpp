@@ -12,6 +12,7 @@
 
 #include <algorithm>
 
+#include <QActionGroup>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QGuiApplication>
@@ -119,7 +120,14 @@ void MainWindow::handleAction(Action a, bool)
     case Action::InfoOverlay: m_hud->setInfoVisible(!m_hud->infoVisible()); break;
     case Action::OffsetMinus: m_player->setOffset(m_player->offset() - 1); break;
     case Action::OffsetPlus: m_player->setOffset(m_player->offset() + 1); break;
-    case Action::SwapAB: m_player->swapSlots(); updateTitle(); break;
+    case Action::SwapAB: {
+        m_player->swapSlots();
+        const render::ColorOverrides a = m_view->colorOverrides(0);
+        m_view->setColorOverrides(0, m_view->colorOverrides(1));
+        m_view->setColorOverrides(1, a);
+        updateTitle();
+        break;
+    }
     case Action::ViewCycle:
     case Action::ViewSideBySide:
     case Action::ViewWipe:
@@ -241,6 +249,8 @@ void MainWindow::createMenus()
     for (Action a : {Action::InfoOverlay, Action::Fullscreen})
         playerAction(view, a);
 
+    createColorMenu();
+
     QMenu* compare = menuBar()->addMenu(tr("&Compare"));
     for (Action a : {Action::ViewCycle, Action::ViewSideBySide, Action::ViewWipe, Action::ViewFlip, Action::ViewDifference,
                      Action::DiffGainUp, Action::DiffGainDown})
@@ -248,6 +258,56 @@ void MainWindow::createMenus()
     compare->addSeparator();
     for (Action a : {Action::OffsetMinus, Action::OffsetPlus, Action::SwapAB})
         playerAction(compare, a);
+}
+
+// Colour interpretation per video: metadata is often missing or wrong in camera and test files.
+void MainWindow::createColorMenu()
+{
+    QMenu* color = menuBar()->addMenu(tr("C&olor"));
+    for (int slot = 0; slot < 2; ++slot) {
+        const QString v = slot == 0 ? QStringLiteral("A") : QStringLiteral("B");
+        QMenu* matrix = color->addMenu(tr("%1: YUV matrix").arg(v));
+        auto* mg = new QActionGroup(matrix);
+        const std::pair<const char*, std::optional<AVColorSpace>> matrices[] = {
+            {"Auto (metadata)", std::nullopt}, {"BT.601", AVCOL_SPC_BT470BG}, {"BT.709", AVCOL_SPC_BT709}, {"BT.2020", AVCOL_SPC_BT2020_NCL}};
+        for (const auto& [name, cs] : matrices) {
+            QAction* a = matrix->addAction(tr(name));
+            a->setCheckable(true);
+            a->setChecked(!cs);
+            mg->addAction(a);
+            connect(a, &QAction::triggered, this, [this, slot, cs = cs] {
+                render::ColorOverrides o = m_view->colorOverrides(slot);
+                o.matrix = cs;
+                m_view->setColorOverrides(slot, o);
+            });
+        }
+        QMenu* range = color->addMenu(tr("%1: range").arg(v));
+        auto* rg = new QActionGroup(range);
+        const std::pair<const char*, std::optional<AVColorRange>> ranges[] = {
+            {"Auto (metadata)", std::nullopt}, {"Limited (16-235)", AVCOL_RANGE_MPEG}, {"Full (0-255)", AVCOL_RANGE_JPEG}};
+        for (const auto& [name, r] : ranges) {
+            QAction* a = range->addAction(tr(name));
+            a->setCheckable(true);
+            a->setChecked(!r);
+            rg->addAction(a);
+            connect(a, &QAction::triggered, this, [this, slot, r = r] {
+                render::ColorOverrides o = m_view->colorOverrides(slot);
+                o.range = r;
+                m_view->setColorOverrides(slot, o);
+            });
+        }
+    }
+    color->addSeparator();
+    QAction* bilinear = color->addAction(tr("Interpolate chroma (bilinear)"));
+    bilinear->setCheckable(true);
+    bilinear->setToolTip(tr("Off: each pixel uses the chroma sample covering it (exact codes)"));
+    connect(bilinear, &QAction::toggled, this, [this](bool on) {
+        for (int slot = 0; slot < 2; ++slot) {
+            render::ColorOverrides o = m_view->colorOverrides(slot);
+            o.chromaBilinear = on;
+            m_view->setColorOverrides(slot, o);
+        }
+    });
 }
 
 void MainWindow::applySettings(const AppSettings& s)

@@ -44,6 +44,18 @@ const char* ColorParams::matrixName(AVColorSpace cs)
     }
 }
 
+ChromaSiting ChromaSiting::of(AVChromaLocation loc)
+{
+    switch (loc) {
+    case AVCHROMA_LOC_CENTER: return {0.5f, 0.5f};
+    case AVCHROMA_LOC_TOPLEFT: return {0.0f, 0.0f};
+    case AVCHROMA_LOC_TOP: return {0.5f, 0.0f};
+    case AVCHROMA_LOC_BOTTOMLEFT: return {0.0f, 1.0f};
+    case AVCHROMA_LOC_BOTTOM: return {0.5f, 1.0f};
+    default: return {0.0f, 0.5f};  // left: MPEG-2/H.264/HEVC default
+    }
+}
+
 ColorParams ColorParams::resolve(const PixelLayout& layout, AVColorSpace colorspace, AVColorRange range, int height,
                                  const ColorOverrides& overrides)
 {

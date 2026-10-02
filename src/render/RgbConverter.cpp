@@ -77,6 +77,10 @@ bool RgbConverter::convert(GL* gl, ShaderLibrary& shaders, const TextureSource& 
     QByteArray defines = layoutDefine(l.layout);
     if (emitCodes)
         defines += " EMIT_CODES";
+    const bool linear = color.chromaBilinear && (l.layout == Layout::PlanarYuv || l.layout == Layout::SemiYuv) &&
+                        (l.chromaShiftX || l.chromaShiftY);
+    if (linear)
+        defines += " CHROMA_LINEAR";
     QOpenGLShaderProgram* prog = shaders.program(QStringLiteral("fullscreen.vert"), QStringLiteral("convert.frag"), defines);
     if (!prog) {
         m_error = shaders.lastError();
@@ -109,6 +113,10 @@ bool RgbConverter::convert(GL* gl, ShaderLibrary& shaders, const TextureSource& 
     gl->glUniform1f(loc("outMax"), color.outMax);
     gl->glUniform1i(loc("flipY"), src.flipY() ? 1 : 0);
     gl->glUniform1i(loc("height"), m_h);
+    if (linear) {
+        gl->glUniform2f(loc("siting"), color.siting.x, color.siting.y);
+        gl->glUniform2i(loc("chromaSize"), AV_CEIL_RSHIFT(m_w, l.chromaShiftX), AV_CEIL_RSHIFT(m_h, l.chromaShiftY));
+    }
     gl->glBindVertexArray(m_vao);
     gl->glDrawArrays(GL_TRIANGLES, 0, 3);
     gl->glBindVertexArray(0);

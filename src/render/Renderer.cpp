@@ -44,7 +44,7 @@ bool Renderer::prepare(Slot& s, const FramePtr& frame, const ColorOverrides& ove
         s.shown = nullptr;
         return false;
     }
-    const bool sameColor = s.overrides.matrix == overrides.matrix && s.overrides.range == overrides.range;
+    const bool sameColor = s.overrides == overrides;
     if (s.valid && s.shown == frame.get() && sameColor && (s.codes || !codes))
         return true;
     const auto t0 = std::chrono::steady_clock::now();
@@ -79,6 +79,8 @@ bool Renderer::prepare(Slot& s, const FramePtr& frame, const ColorOverrides& ove
     const auto t1 = std::chrono::steady_clock::now();
     s.overrides = overrides;
     s.color = ColorParams::resolve(source->layout(), frame->av->colorspace, frame->av->color_range, frame->height(), overrides);
+    s.color.chromaBilinear = overrides.chromaBilinear;
+    s.color.siting = ChromaSiting::of(frame->av->chroma_location);
     s.gray = source->layout().isGray();
     s.codes = codes;
     if (!s.conv.convert(m_gl, m_shaders, *source, s.color, codes)) {

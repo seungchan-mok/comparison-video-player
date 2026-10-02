@@ -11,6 +11,21 @@ namespace scvp::render {
 struct ColorOverrides {
     std::optional<AVColorSpace> matrix;  // AVCOL_SPC_BT709, AVCOL_SPC_BT470BG (601), AVCOL_SPC_BT2020_NCL, ...
     std::optional<AVColorRange> range;   // AVCOL_RANGE_MPEG (limited) or AVCOL_RANGE_JPEG (full)
+    bool chromaBilinear = false;         // interpolate subsampled chroma (default: nearest sample)
+
+    bool operator==(const ColorOverrides& o) const
+    {
+        return matrix == o.matrix && range == o.range && chromaBilinear == o.chromaBilinear;
+    }
+    bool operator!=(const ColorOverrides& o) const { return !(*this == o); }
+};
+
+// Position of a subsampled chroma sample relative to the luma samples it covers, per axis:
+// 0 = with the first (left/top), 0.5 = centred, 1 = with the last (bottom).
+struct ChromaSiting {
+    float x = 0.0f;
+    float y = 0.5f;
+    static ChromaSiting of(AVChromaLocation loc);
 };
 
 // Code values -> RGB for one source:  rgb = clamp(M * ((code - offset) * scale)), then quantized
@@ -25,6 +40,8 @@ struct ColorParams {
     int bitDepth = 8;
     AVColorSpace matrixUsed = AVCOL_SPC_RGB;
     AVColorRange rangeUsed = AVCOL_RANGE_JPEG;
+    bool chromaBilinear = false;  // only for subsampled YUV
+    ChromaSiting siting;
 
     // `colorspace`/`range` are the frame's metadata (unspecified values pick defaults: BT.709
     // for height >= 720 else BT.601; limited range for YUV except yuvj*, full for RGB/gray).

@@ -127,6 +127,13 @@ QStringList HudOverlay::lines() const
                            .arg(st.spills)
                            .arg(pathText(slot));
         out << decoder;
+        if (auto* view = qobject_cast<const VideoView*>(parentWidget()); view && f) {
+            const render::ColorParams c = view->colorParams(slot);
+            out << QStringLiteral("   color %1 %2, chroma %3")
+                       .arg(QString::fromLatin1(render::ColorParams::matrixName(c.matrixUsed)),
+                            c.rangeUsed == AVCOL_RANGE_JPEG ? QStringLiteral("full") : QStringLiteral("limited"),
+                            c.chromaBilinear ? QStringLiteral("bilinear") : QStringLiteral("nearest"));
+        }
         out << QStringLiteral("   cache %1 frames %2 MB / %3 MB, %4 decoded, %5 seeks%6")
                    .arg(st.cachedFrames)
                    .arg(st.cachedBytes >> 20)

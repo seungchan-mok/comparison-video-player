@@ -138,6 +138,69 @@ private slots:
         QCOMPARE(int(gl->glGetError()), int(GL_NO_ERROR));
     }
 
+    void bilinearChroma_data()
+    {
+        QTest::addColumn<int>("format");
+        QTest::addColumn<int>("location");
+        for (AVPixelFormat f : {AV_PIX_FMT_YUV420P, AV_PIX_FMT_NV12, AV_PIX_FMT_YUV422P10LE, AV_PIX_FMT_P010LE, AV_PIX_FMT_YUV410P})
+            for (AVChromaLocation loc : {AVCHROMA_LOC_LEFT, AVCHROMA_LOC_CENTER, AVCHROMA_LOC_TOPLEFT})
+                QTest::newRow(qPrintable(QStringLiteral("%1 %2").arg(av_get_pix_fmt_name(f), av_chroma_location_name(loc)))) << int(f) << int(loc);
+    }
+
+    // Interpolated chroma against a CPU reference of the same formula; the codes stay nearest.
+    void bilinearChroma()
+    {
+        QFETCH(int, format);
+        QFETCH(int, location);
+        GL* gl = m_gl.gl();
+        const auto fmt = AVPixelFormat(format);
+        const auto l = *PixelLayout::of(fmt);
+        ColorParams c = ColorParams::resolve(l, AVCOL_SPC_BT709, AVCOL_RANGE_MPEG, 1080);
+        c.chromaBilinear = true;
+        c.siting = ChromaSiting::of(AVChromaLocation(location));
+        auto f = randomFrame(m_pool, fmt, 37, 23, uint32_t(format + location));
+        QVERIFY(m_upload.update(gl, *f));
+        QVERIFY2(m_conv.convert(gl, m_shaders, m_upload, c, true), qPrintable(m_conv.error()));
+        const auto rgb = m_conv.readRgb(gl);
+        const auto codes = m_conv.readCodes(gl);
+        const int sx = l.chromaShiftX, sy = l.chromaShiftY;
+        const int cw = AV_CEIL_RSHIFT(37, sx), ch = AV_CEIL_RSHIFT(23, sy);
+        int worst = 0;
+        int64_t off = 0;
+        for (int y = 0; y < 23; ++y)
+            for (int x = 0; x < 37; ++x) {
+                const auto k = readCodes(f->av, l, x, y);
+                const double fx = double(1 << sx), fy = double(1 << sy);
+                const double cx = (x - c.siting.x * (fx - 1)) / fx, cy = (y - c.siting.y * (fy - 1)) / fy;
+                const int x0 = int(std::floor(cx)), y0 = int(std::floor(cy));
+                const double wx = cx - x0, wy = cy - y0;
+                double cb = 0, cr = 0;
+                for (int dy = 0; dy < 2; ++dy)
+                    for (int dx = 0; dx < 2; ++dx) {
+                        const int qx = std::clamp(x0 + dx, 0, cw - 1), qy = std::clamp(y0 + dy, 0, ch - 1);
+                        const auto q = readCodes(f->av, l, qx << sx, qy << sy);
+                        const double w = (dx ? wx : 1 - wx) * (dy ? wy : 1 - wy);
+                        cb += w * q[1];
+                        cr += w * q[2];
+                    }
+                const double v[3] = {(k[0] - c.offset[0]) * c.scale[0], (cb - c.offset[1]) * c.scale[1], (cr - c.offset[2]) * c.scale[2]};
+                const size_t i = (size_t(y) * 37 + size_t(x)) * 3;
+                for (int o = 0; o < 3; ++o) {
+                    double r = 0;
+                    for (int j = 0; j < 3; ++j)
+                        r += c.matrix[size_t(o * 3 + j)] * v[j];
+                    const int ref = int(std::floor(std::clamp(r, 0.0, 1.0) * c.outMax + 0.5));
+                    const int d = std::abs(int(rgb[i + size_t(o)]) - ref);
+                    worst = std::max(worst, d);
+                    off += d ? 1 : 0;
+                    QCOMPARE(int(codes[i + size_t(o)]), int(k[size_t(o)]));
+                }
+            }
+        QVERIFY2(worst <= 1, qPrintable(QString::number(worst)));
+        QVERIFY2(off <= 37 * 23 * 3 / 100, qPrintable(QString::number(off)));
+        QCOMPARE(int(gl->glGetError()), int(GL_NO_ERROR));
+    }
+
     void negativeLinesizeIsFlipped()
     {
         GL* gl = m_gl.gl();

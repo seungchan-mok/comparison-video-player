@@ -21,6 +21,9 @@ public:
     render::ViewTransform& transform() { return m_state.view; }
     void setCompare(const render::CompareSettings& c);
     void setOverlay(const render::PixelOverlaySettings& o);
+    void setColorOverrides(int slot, const render::ColorOverrides& o);
+    const render::ColorOverrides& colorOverrides(int slot) const { return m_state.color[size_t(slot)]; }
+    render::ColorParams colorParams(int slot) const { return m_renderer.colorParams(slot); }
     const render::PixelOverlaySettings& overlay() const { return m_state.overlay; }
     const render::CompareSettings& compare() const { return m_state.compare; }
     // Panes for the current mode and frames (device px).
