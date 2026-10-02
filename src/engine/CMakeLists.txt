@@ -14,6 +14,7 @@ add_library(scvp_engine STATIC
     Log.h Log.cpp
     Mailbox.h
     Platform.h Platform.cpp
+    PlaybackController.h PlaybackController.cpp
     PrefetchPlanner.h PrefetchPlanner.cpp
     VideoSource.h
 )

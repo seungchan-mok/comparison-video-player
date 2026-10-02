@@ -8,3 +8,4 @@ scvp_add_test(tst_prefetchplanner tst_prefetchplanner.cpp)
 scvp_add_test(tst_engine tst_engine.cpp
     FUNCTIONS showsRequestedFrame sequentialPlayback backwardStepping randomJumps
               shrinkingBudgetReleasesMemory twoVideosShareTheBudget closeWhileDecoding)
+scvp_add_test(tst_playbackcontroller tst_playbackcontroller.cpp)
