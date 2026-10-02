@@ -1,4 +1,5 @@
 #include "engine/FfmpegCompat.h"
+#include "ui/AppIcon.h"
 #include "ui/KeyMap.h"
 #include "ui/MainWindow.h"
 
@@ -7,11 +8,14 @@
 
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QElapsedTimer>
+#include <QFileOpenEvent>
 #include <QMouseEvent>
 #include <QSurfaceFormat>
 #include <QTimer>
 
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -42,13 +46,52 @@ void setDefaultSurfaceFormat()
     QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 }
 
+// Files handed over by the desktop instead of the command line (macOS Finder, Dock). The first
+// opens as A; one arriving right after it (several files opened together) becomes B.
+class FileOpenFilter : public QObject {
+public:
+    explicit FileOpenFilter(scvp::ui::MainWindow& w)
+        : m_window(w)
+    {
+        m_since.start();
+    }
+
+protected:
+    bool eventFilter(QObject* obj, QEvent* e) override
+    {
+        if (e->type() != QEvent::FileOpen)
+            return QObject::eventFilter(obj, e);
+        const QString file = static_cast<QFileOpenEvent*>(e)->file();
+        if (file.isEmpty())
+            return false;
+        const bool together = m_count > 0 && m_since.elapsed() < 1500;
+        m_window.openFile(together ? 1 : 0, file);
+        m_count = together ? 0 : 1;
+        m_since.restart();
+        return true;
+    }
+
+private:
+    scvp::ui::MainWindow& m_window;
+    QElapsedTimer m_since;
+    int m_count = 0;
+};
+
 } // namespace
 
 int main(int argc, char* argv[])
 {
+    // Packaging: write the launcher icons and exit (no display needed).
+    if (argc == 3 && std::strcmp(argv[1], "--export-icons") == 0)
+        return scvp::ui::exportAppIcons(QString::fromLocal8Bit(argv[2])) ? 0 : 1;
+
     setDefaultSurfaceFormat();
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("scvp"));
+    QApplication::setApplicationDisplayName(QStringLiteral("SCVP"));
+    // Matches the installed scvp.desktop: dock icon and window grouping, Wayland app id.
+    QGuiApplication::setDesktopFileName(QStringLiteral("scvp"));
+    QApplication::setWindowIcon(scvp::ui::appIcon());
     QApplication::setOrganizationName(QStringLiteral("scvp"));
     QApplication::setApplicationVersion(QStringLiteral(SCVP_VERSION));
     scvp::ff::installLogCallback(AV_LOG_ERROR);
@@ -92,6 +135,8 @@ int main(int argc, char* argv[])
     std::fprintf(stderr, "scvp %s, Qt %s, %s\n", SCVP_VERSION, qVersion(), qPrintable(ffmpegVersionString()));
 
     scvp::ui::MainWindow window;
+    FileOpenFilter fileOpen(window);
+    app.installEventFilter(&fileOpen);
     if (parser.isSet(cacheMb))
         window.overrideCacheBudget(size_t(parser.value(cacheMb).toULongLong()) << 20);
     if (parser.isSet(vramMb))

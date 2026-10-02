@@ -12,6 +12,9 @@ target_link_libraries(scvp PRIVATE
 set_target_properties(scvp PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "SCVP"
     MACOSX_BUNDLE_GUI_IDENTIFIER "dev.scvp.player"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/packaging/Info.plist.in"
 )
 
 if(WIN32)
@@ -41,5 +44,14 @@ if(WIN32)
     install(FILES $<TARGET_RUNTIME_DLLS:scvp> DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 if(UNIX AND NOT APPLE)
+    # Applications-menu entry, file types and icons (the icons are drawn by the program itself).
     install(FILES ${CMAKE_SOURCE_DIR}/packaging/scvp.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    install(FILES ${CMAKE_SOURCE_DIR}/packaging/scvp-mime.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/mime/packages
+            RENAME scvp.xml)
+    install(CODE "execute_process(COMMAND \"$<TARGET_FILE:scvp>\" --export-icons
+                      \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/icons/hicolor\"
+                  RESULT_VARIABLE scvp_icons_result)
+                  if(NOT scvp_icons_result EQUAL 0)
+                      message(FATAL_ERROR \"exporting the application icons failed\")
+                  endif()")
 endif()

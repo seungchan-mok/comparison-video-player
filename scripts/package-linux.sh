@@ -36,6 +36,9 @@ collect "$OUT/bin/scvp"
 find "$OUT/plugins" -name '*.so' | while read -r p; do collect "$p"; done
 for l in "$OUT"/lib/*.so*; do collect "$l"; done
 
+# Per-user installer (applications menu, icons, file types, default player).
+install -m 755 packaging/install.sh "$OUT/install.sh"
+
 # Launcher: bundled libraries and plugins first.
 cat > "$OUT/scvp" <<'SH'
 #!/bin/sh
@@ -52,4 +55,4 @@ if [[ -n "$missing" ]]; then echo "unresolved libraries:"; echo "$missing"; exit
 
 tar -C dist -czf "$OUT.tar.gz" "$(basename "$OUT")"
 du -sh "$OUT" "$OUT.tar.gz"
-echo "Run: $OUT/scvp [A] [B]"
+echo "Run: $OUT/scvp [A] [B]    Install for this user: $OUT/install.sh [--set-default]"

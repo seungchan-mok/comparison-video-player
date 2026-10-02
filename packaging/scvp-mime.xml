@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- File types SCVP opens that the shared MIME database does not know (raw streams). -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="video/x-h264">
+    <comment>H.264 elementary stream</comment>
+    <comment xml:lang="ko">H.264 원시 스트림</comment>
+    <glob pattern="*.h264"/>
+    <glob pattern="*.264"/>
+  </mime-type>
+  <mime-type type="video/x-h265">
+    <comment>HEVC elementary stream</comment>
+    <comment xml:lang="ko">HEVC 원시 스트림</comment>
+    <glob pattern="*.h265"/>
+    <glob pattern="*.265"/>
+    <glob pattern="*.hevc"/>
+  </mime-type>
+  <mime-type type="video/x-yuv4mpeg">
+    <comment>YUV4MPEG2 video</comment>
+    <comment xml:lang="ko">YUV4MPEG2 영상</comment>
+    <magic priority="50">
+      <match type="string" value="YUV4MPEG2" offset="0"/>
+    </magic>
+    <glob pattern="*.y4m"/>
+  </mime-type>
+  <mime-type type="video/x-ivf">
+    <comment>IVF video (VP8/VP9/AV1)</comment>
+    <comment xml:lang="ko">IVF 영상 (VP8/VP9/AV1)</comment>
+    <magic priority="50">
+      <match type="string" value="DKIF" offset="0"/>
+    </magic>
+    <glob pattern="*.ivf"/>
+  </mime-type>
+  <mime-type type="video/x-av1-obu">
+    <comment>AV1 elementary stream</comment>
+    <comment xml:lang="ko">AV1 원시 스트림</comment>
+    <glob pattern="*.obu"/>
+  </mime-type>
+  <mime-type type="video/x-raw-yuv">
+    <comment>Raw YUV video</comment>
+    <comment xml:lang="ko">원시 YUV 영상</comment>
+    <glob pattern="*.yuv"/>
+    <glob pattern="*.nv12"/>
+    <glob pattern="*.nv21"/>
+    <glob pattern="*.p010"/>
+    <glob pattern="*.uyvy"/>
+    <glob pattern="*.yuyv"/>
+  </mime-type>
+  <mime-type type="video/mpeg">
+    <glob pattern="*.m2v"/>
+    <glob pattern="*.m1v"/>
+  </mime-type>
+</mime-info>

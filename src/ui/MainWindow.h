@@ -41,6 +41,7 @@ public:
     void reopenAll();  // after a decoding change: same files, same frame
     void setCompare(const render::CompareSettings& c);
     QString inspectorText() const;
+    void offerDefaultPlayer();
 
 protected:
     void dragEnterEvent(QDragEnterEvent* e) override;

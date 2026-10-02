@@ -3,6 +3,7 @@
 #include "engine/RawVideoSource.h"
 
 #include "ui/ControlBar.h"
+#include "ui/DesktopIntegration.h"
 #include "ui/HudOverlay.h"
 #include "ui/KeyRouter.h"
 #include "ui/OpenRawDialog.h"
@@ -200,6 +201,37 @@ render::CompareSettings nextCompare(render::CompareSettings c, Action a, render:
     return c;
 }
 
+// Linux: SCVP opens videos from the file manager once it is the default for their types.
+void MainWindow::offerDefaultPlayer()
+{
+    if (desktop::installedEntry().isEmpty()) {
+        QMessageBox::information(this, tr("Default video player"),
+                                 tr("SCVP is not installed for this user yet.\n\n"
+                                    "Run install.sh in the SCVP folder once (or double-click it and choose Run): it adds SCVP "
+                                    "to the applications menu and to \"Open With\" for videos."));
+        return;
+    }
+    if (desktop::isDefault()) {
+        QMessageBox::information(this, tr("Default video player"), tr("SCVP already opens videos by default."));
+        return;
+    }
+    const QString current = desktop::applicationName(desktop::defaultFor(QStringLiteral("video/mp4")));
+    const QString text = current.isEmpty()
+                             ? tr("Open MP4, MKV, MOV, AVI, WebM, TS, raw H.264/HEVC/YUV and the other video types SCVP "
+                                  "supports with SCVP by default?")
+                             : tr("Videos currently open with %1.\n\nOpen MP4, MKV, MOV, AVI, WebM, TS, raw H.264/HEVC/YUV and "
+                                  "the other video types SCVP supports with SCVP by default instead?\n\n"
+                                  "(This can be changed back in Settings > Apps > Default Apps.)")
+                                   .arg(current);
+    if (QMessageBox::question(this, tr("Default video player"), text) != QMessageBox::Yes)
+        return;
+    QString err;
+    if (!desktop::setAsDefault(&err))
+        QMessageBox::warning(this, tr("Default video player"), tr("Could not change the default application.\n\n%1").arg(err));
+    else
+        QMessageBox::information(this, tr("Default video player"), tr("Videos now open with SCVP."));
+}
+
 QString MainWindow::inspectorText() const { return m_hud->pixelText(); }
 
 void MainWindow::setCompare(const render::CompareSettings& c)
@@ -239,6 +271,8 @@ void MainWindow::createMenus()
     QAction* closeB = file->addAction(tr("Close B"), this, [this] { m_player->close(1); updateTitle(); });
     closeB->setShortcut(QKeySequence(Qt::ControlModifier | Qt::ShiftModifier | Qt::Key_W));
     file->addSeparator();
+    if (desktop::supported())
+        file->addAction(tr("Make SCVP the Default Video Player..."), this, &MainWindow::offerDefaultPlayer);
     QAction* settings = file->addAction(tr("&Settings..."), this, &MainWindow::showSettings);
     settings->setShortcut(QKeySequence::Preferences);
     settings->setMenuRole(QAction::PreferencesRole);
