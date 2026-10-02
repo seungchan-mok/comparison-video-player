@@ -123,7 +123,20 @@ void MainWindow::handleAction(Action a, bool)
     case Action::ViewDifference:
     case Action::DiffGainUp:
     case Action::DiffGainDown: setCompare(nextCompare(m_view->compare(), a, m_view->layout().orientation)); break;
-    default: break;  // pixel-inspection actions arrive with their feature
+    case Action::PixelValues: {
+        render::PixelOverlaySettings o = m_view->overlay();
+        o.values = !o.values;
+        m_view->setOverlay(o);
+        break;
+    }
+    case Action::PixelValueMode: {
+        render::PixelOverlaySettings o = m_view->overlay();
+        o.mode = o.mode == render::ValueMode::Rgb ? render::ValueMode::Codes : render::ValueMode::Rgb;
+        o.values = true;
+        m_view->setOverlay(o);
+        break;
+    }
+    default: break;
     }
 }
 
@@ -205,6 +218,9 @@ void MainWindow::createMenus()
 
     QMenu* view = menuBar()->addMenu(tr("&View"));
     for (Action a : {Action::ZoomFit, Action::ZoomOneToOne, Action::ZoomIn, Action::ZoomOut})
+        playerAction(view, a);
+    view->addSeparator();
+    for (Action a : {Action::PixelValues, Action::PixelValueMode})
         playerAction(view, a);
     view->addSeparator();
     for (Action a : {Action::InfoOverlay, Action::Fullscreen})

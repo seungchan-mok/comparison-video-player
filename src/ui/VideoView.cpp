@@ -75,7 +75,14 @@ void VideoView::updateGeometry()
     const double dpr = devicePixelRatioF();
     const QSize fb(int(std::lround(width() * dpr)), int(std::lround(height() * dpr)));
     m_state.framebufferSize = fb;
+    m_state.devicePixelRatio = dpr;
     m_state.view.setViewportSize(QSizeF(layout().paneSize()));
+}
+
+void VideoView::setOverlay(const render::PixelOverlaySettings& o)
+{
+    m_state.overlay = o;
+    update();
 }
 
 void VideoView::setCompare(const render::CompareSettings& c)

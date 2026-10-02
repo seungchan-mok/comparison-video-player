@@ -4,6 +4,8 @@
 #include "render/CompareLayout.h"
 #include "render/ColorParams.h"
 #include "render/CudaInteropSource.h"
+#include "render/DigitAtlas.h"
+#include "render/PixelOverlay.h"
 #include "render/RgbConverter.h"
 #include "render/ShaderLibrary.h"
 #include "render/TextureSource.h"
@@ -25,6 +27,8 @@ struct RenderState {
     QColor background{30, 30, 32};
     std::array<ColorOverrides, 2> color;
     CompareSettings compare;
+    PixelOverlaySettings overlay;
+    double devicePixelRatio = 1.0;   // for size thresholds given in logical px
     QColor divider{90, 90, 96};      // between split panes, and the wipe line
 };
 
@@ -69,9 +73,11 @@ private:
         FramePtr hold;                  // keeps it alive while its pixels are on the GPU
         ColorParams color;
         ColorOverrides overrides;
+        bool codes = false;             // the converter also wrote the source codes
+        bool gray = false;
         bool valid = false;
     };
-    bool prepare(Slot& s, const FramePtr& frame, const ColorOverrides& overrides);
+    bool prepare(Slot& s, const FramePtr& frame, const ColorOverrides& overrides, bool codes);
     // mode: 0 = slot `a` only, 1 = wipe, 2 = difference (as in display.frag).
     void drawPane(int mode, const Slot& a, const Slot& b, const RenderState& state, QRect pane);
 
@@ -79,6 +85,7 @@ private:
     ShaderLibrary m_shaders;
     std::array<Slot, 2> m_slots;
     GLuint m_vao = 0;
+    DigitAtlas m_digits;
     RenderTimings m_timings;
     CompareLayout m_layout;
     QString m_error;

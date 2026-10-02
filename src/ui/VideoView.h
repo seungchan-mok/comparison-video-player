@@ -20,6 +20,8 @@ public:
     void setFrames(const std::array<FramePtr, 2>& frames);
     render::ViewTransform& transform() { return m_state.view; }
     void setCompare(const render::CompareSettings& c);
+    void setOverlay(const render::PixelOverlaySettings& o);
+    const render::PixelOverlaySettings& overlay() const { return m_state.overlay; }
     const render::CompareSettings& compare() const { return m_state.compare; }
     // Panes for the current mode and frames (device px).
     render::CompareLayout layout() const;

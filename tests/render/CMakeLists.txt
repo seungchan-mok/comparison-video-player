@@ -13,6 +13,12 @@ if(UNIX AND NOT APPLE)
     set_tests_properties(tst_display.mesa PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;__GLX_VENDOR_LIBRARY_NAME=mesa;LIBGL_ALWAYS_SOFTWARE=1")
 endif()
+scvp_add_test(tst_digits tst_digits.cpp LIBS scvp_gltestsupport)
+if(UNIX AND NOT APPLE)
+    add_test(NAME tst_digits.mesa COMMAND tst_digits)
+    set_tests_properties(tst_digits.mesa PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;__GLX_VENDOR_LIBRARY_NAME=mesa;LIBGL_ALWAYS_SOFTWARE=1")
+endif()
 scvp_add_test(tst_cudainterop tst_cudainterop.cpp LIBS scvp_gltestsupport)
 
 # Upload/convert timing on the current GL driver (not a ctest; run by hand):

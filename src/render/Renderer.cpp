@@ -27,6 +27,7 @@ void Renderer::release()
         s.shown = nullptr;
         s.valid = false;
     }
+    m_digits.release(m_gl);
     if (m_vao)
         m_gl->glDeleteVertexArrays(1, &m_vao);
     m_vao = 0;
@@ -34,7 +35,7 @@ void Renderer::release()
     m_gl = nullptr;
 }
 
-bool Renderer::prepare(Slot& s, const FramePtr& frame, const ColorOverrides& overrides)
+bool Renderer::prepare(Slot& s, const FramePtr& frame, const ColorOverrides& overrides, bool codes)
 {
     if (!frame) {
         s.valid = false;
@@ -43,7 +44,7 @@ bool Renderer::prepare(Slot& s, const FramePtr& frame, const ColorOverrides& ove
         return false;
     }
     const bool sameColor = s.overrides.matrix == overrides.matrix && s.overrides.range == overrides.range;
-    if (s.valid && s.shown == frame.get() && sameColor)
+    if (s.valid && s.shown == frame.get() && sameColor && (s.codes || !codes))
         return true;
     const auto t0 = std::chrono::steady_clock::now();
     const TextureSource* source = nullptr;
@@ -77,7 +78,9 @@ bool Renderer::prepare(Slot& s, const FramePtr& frame, const ColorOverrides& ove
     const auto t1 = std::chrono::steady_clock::now();
     s.overrides = overrides;
     s.color = ColorParams::resolve(source->layout(), frame->av->colorspace, frame->av->color_range, frame->height(), overrides);
-    if (!s.conv.convert(m_gl, m_shaders, *source, s.color, false)) {
+    s.gray = source->layout().isGray();
+    s.codes = codes;
+    if (!s.conv.convert(m_gl, m_shaders, *source, s.color, codes)) {
         m_error = s.conv.error();
         s.valid = false;
         return false;
@@ -124,9 +127,36 @@ void Renderer::drawPane(int mode, const Slot& a, const Slot& b, const RenderStat
     gl->glBindTexture(GL_TEXTURE_2D, a.conv.rgbTexture());
     gl->glActiveTexture(GL_TEXTURE1);
     gl->glBindTexture(GL_TEXTURE_2D, mode ? b.conv.rgbTexture() : a.conv.rgbTexture());
+    // Digits and grid, once the cells are big enough.
+    const double dpr = state.devicePixelRatio > 0 ? state.devicePixelRatio : 1.0;
+    const PixelOverlaySettings& ov = state.overlay;
+    const bool magnified = lod <= 0.0f;
+    const bool codes = ov.mode == ValueMode::Codes && a.conv.codesTexture() && (!mode || b.conv.codesTexture());
+    const int maxCode = (1 << a.conv.bitDepth()) - 1;
+    const ValueGeometry geom = ValueGeometry::compute(maxCode, a.gray && (!mode || b.gray), mode == 2, scale, dpr);
+    const int values = ov.values && magnified && geom.visible ? (codes ? 2 : 1) : 0;
+    if (values && !m_digits.texture())
+        m_digits.create(gl);
+    gl->glActiveTexture(GL_TEXTURE2);
+    gl->glBindTexture(GL_TEXTURE_2D, values == 2 ? a.conv.codesTexture() : 0);
+    gl->glActiveTexture(GL_TEXTURE3);
+    gl->glBindTexture(GL_TEXTURE_2D, values == 2 && mode ? b.conv.codesTexture() : 0);
+    gl->glActiveTexture(GL_TEXTURE4);
+    gl->glBindTexture(GL_TEXTURE_2D_ARRAY, values ? m_digits.texture() : 0);
     gl->glActiveTexture(GL_TEXTURE0);
     gl->glUniform1i(loc("img0"), 0);
     gl->glUniform1i(loc("img1"), 1);
+    gl->glUniform1i(loc("codes0"), 2);
+    gl->glUniform1i(loc("codes1"), 3);
+    gl->glUniform1i(loc("digits"), 4);
+    gl->glUniform1i(loc("values"), values);
+    gl->glUniform1f(loc("maxCode0"), float(maxCode));
+    gl->glUniform1f(loc("maxCode1"), float((1 << (mode ? b.conv.bitDepth() : a.conv.bitDepth())) - 1));
+    gl->glUniform1i(loc("rows"), geom.rows);
+    gl->glUniform1i(loc("field"), geom.field);
+    gl->glUniform2f(loc("glyph"), float(geom.glyphW), float(geom.glyphH));
+    gl->glUniform1f(loc("rowH"), float(geom.rowH));
+    gl->glUniform1f(loc("gridAlpha"), ov.grid && magnified && scale >= kGridMinLogicalPx * dpr ? 0.25f : 0.0f);
     gl->glUniform2f(loc("size0"), float(a.conv.width()), float(a.conv.height()));
     gl->glUniform2f(loc("size1"), float(mode ? b.conv.width() : a.conv.width()), float(mode ? b.conv.height() : a.conv.height()));
     gl->glUniform2f(loc("k0"), float(k0.width()), float(k0.height()));
@@ -148,6 +178,9 @@ void Renderer::drawPane(int mode, const Slot& a, const Slot& b, const RenderStat
     gl->glDrawArrays(GL_TRIANGLES, 0, 3);
     gl->glBindVertexArray(0);
     prog->release();
+    gl->glActiveTexture(GL_TEXTURE4);
+    gl->glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    gl->glActiveTexture(GL_TEXTURE0);
 }
 
 void Renderer::render(const RenderState& state, GLuint targetFbo)
@@ -156,7 +189,8 @@ void Renderer::render(const RenderState& state, GLuint targetFbo)
         return;
     m_timings = {};
     for (int i = 0; i < 2; ++i)
-        prepare(m_slots[size_t(i)], state.frames[size_t(i)], state.color[size_t(i)]);
+        prepare(m_slots[size_t(i)], state.frames[size_t(i)], state.color[size_t(i)],
+                state.overlay.values && state.overlay.mode == ValueMode::Codes);
 
     GL* gl = m_gl;
     gl->glBindFramebuffer(GL_FRAMEBUFFER, targetFbo);

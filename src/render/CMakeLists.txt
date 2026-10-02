@@ -5,6 +5,8 @@ add_library(scvp_render STATIC
     GlCommon.h
     PixelLayout.h PixelLayout.cpp
     CompareLayout.h CompareLayout.cpp
+    DigitAtlas.h DigitAtlas.cpp
+    PixelOverlay.h PixelOverlay.cpp
     Renderer.h Renderer.cpp
     RgbConverter.h RgbConverter.cpp
     ShaderLibrary.h ShaderLibrary.cpp
