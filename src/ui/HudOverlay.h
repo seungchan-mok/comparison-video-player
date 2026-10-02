@@ -1,6 +1,9 @@
 #pragma once
 
+#include <QElapsedTimer>
 #include <QTimer>
+
+#include <array>
 #include <QWidget>
 
 class QPainter;
@@ -33,11 +36,23 @@ private:
     QStringList lines() const;
     QString pathText(int slot) const;
     void paintPaneLabels(QPainter& p, const QFontMetrics& fm);
+    void sampleRates();  // refresh timer: frame rates over the last second
+    QString perfLine() const;
 
     Player* m_player;
     QTimer m_refresh;
     QTimer m_stallDelay;
     QString m_pixelText;
+    // Performance figures: smoothed over about a second.
+    QElapsedTimer m_rateClock;
+    qint64 m_lastPositionCount = 0;
+    qint64 m_positionCount = 0;
+    std::array<uint64_t, 2> m_lastDecoded{};
+    double m_shownFps = 0;
+    std::array<double, 2> m_decodeFps{};
+    double m_paintMs = 0;
+    double m_uploadMs = 0;
+    double m_convertMs = 0;
     bool m_info = false;
     bool m_stalled = false;
     bool m_showStall = false;

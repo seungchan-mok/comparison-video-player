@@ -22,8 +22,15 @@ HudOverlay::HudOverlay(Player* player, QWidget* parent)
     setAttribute(Qt::WA_NoSystemBackground);
     setFocusPolicy(Qt::NoFocus);
     m_refresh.setInterval(250);
-    connect(&m_refresh, &QTimer::timeout, this, qOverload<>(&QWidget::update));
-    connect(m_player, &Player::positionChanged, this, qOverload<>(&QWidget::update));
+    connect(&m_refresh, &QTimer::timeout, this, [this] {
+        sampleRates();
+        update();
+    });
+    connect(m_player, &Player::positionChanged, this, [this] {
+        ++m_positionCount;
+        update();
+    });
+    m_rateClock.start();
     m_stallDelay.setSingleShot(true);
     m_stallDelay.setInterval(100);  // brief waits do not flash a badge
     connect(&m_stallDelay, &QTimer::timeout, this, [this] {
@@ -87,9 +94,48 @@ QString HudOverlay::pathText(int slot) const
     }
 }
 
+void HudOverlay::sampleRates()
+{
+    const double dt = m_rateClock.restart() / 1000.0;
+    if (dt <= 0)
+        return;
+    auto smooth = [](double old, double now) { return old <= 0 ? now : old * 0.6 + now * 0.4; };
+    m_shownFps = smooth(m_shownFps, double(m_positionCount - m_lastPositionCount) / dt);
+    m_lastPositionCount = m_positionCount;
+    for (int slot = 0; slot < Engine::kSlots; ++slot) {
+        const uint64_t decoded = m_player->slotOpen(slot) ? m_player->engine().stats(slot).framesDecoded : 0;
+        const uint64_t d = decoded >= m_lastDecoded[size_t(slot)] ? decoded - m_lastDecoded[size_t(slot)] : 0;
+        m_decodeFps[size_t(slot)] = smooth(m_decodeFps[size_t(slot)], double(d) / dt);
+        m_lastDecoded[size_t(slot)] = decoded;
+    }
+    if (auto* view = qobject_cast<const VideoView*>(parentWidget())) {
+        m_paintMs = smooth(m_paintMs, view->lastPaintMs());
+        const render::RenderTimings& t = view->lastTimings();
+        if (t.converted) {  // only paints that brought a new frame to the GPU
+            m_uploadMs = smooth(m_uploadMs, t.uploadMs);
+            m_convertMs = smooth(m_convertMs, t.convertMs);
+        }
+    }
+}
+
+QString HudOverlay::perfLine() const
+{
+    QString t = QStringLiteral("perf  shown %1 fps  paint %2 ms (upload %3, convert %4)  decode")
+                    .arg(m_shownFps, 0, 'f', 1)
+                    .arg(m_paintMs, 0, 'f', 2)
+                    .arg(m_uploadMs, 0, 'f', 2)
+                    .arg(m_convertMs, 0, 'f', 2);
+    for (int slot = 0; slot < Engine::kSlots; ++slot)
+        if (m_player->slotOpen(slot))
+            t += QStringLiteral(" %1 %2 fps").arg(slot == 0 ? QLatin1Char('A') : QLatin1Char('B')).arg(m_decodeFps[size_t(slot)], 0, 'f', 0);
+    return t;
+}
+
 QStringList HudOverlay::lines() const
 {
     QStringList out;
+    if (m_player->slotOpen(0) || m_player->slotOpen(1))
+        out << perfLine();
     for (int slot = 0; slot < Engine::kSlots; ++slot) {
         if (!m_player->slotOpen(slot))
             continue;
