@@ -402,6 +402,41 @@ private slots:
         QCOMPARE(b.intents[1].back().loop.first, 10);
         QCOMPARE(b.intents[1].back().loop.last, 20);
     }
+
+    void leaderIsPacedByTheFollower()
+    {
+        TwoBackend b;
+        b.frames[0] = b.frames[1] = 1000;
+        for (int32_t i = 0; i < 1000; ++i)
+            b.available[0].insert(i);  // A fully decoded
+        for (int32_t i = 0; i < 20; ++i)
+            b.available[1].insert(i);  // B only to 19
+        PlaybackController c(b);
+        c.mediaChanged();
+        c.play();
+        c.tick(0);
+        // B (behind) is not limited; A prefetches at most a second (30 frames) past B.
+        QCOMPARE(b.intents[1].back().aheadLimit, -1);
+        QCOMPARE(b.intents[0].back().aheadLimit, 19 + 30);
+        c.setOffset(5);  // B ahead in content: A frame a pairs with B frame a + 5
+        c.tick(0);
+        QCOMPARE(b.intents[0].back().aheadLimit, 19 - 5 + 30);
+        c.pause();
+        QCOMPARE(b.intents[0].back().aheadLimit, -1);  // paused: no pacing
+    }
+
+    void followerAtItsEndDoesNotPace()
+    {
+        TwoBackend b;
+        b.frames[1] = 20;
+        b.all();
+        PlaybackController c(b);
+        c.mediaChanged();
+        c.play();
+        c.tick(0);
+        QCOMPARE(b.intents[0].back().aheadLimit, -1);  // B is complete, then held
+        QCOMPARE(b.intents[1].back().aheadLimit, -1);
+    }
 };
 
 QTEST_APPLESS_MAIN(TstPlaybackController)

@@ -22,6 +22,8 @@ public:
     virtual FramePtr frame(int slot, int32_t n) const = 0;
     virtual void request(int slot, const PlaybackIntent& intent) = 0;
     virtual FrameIndexPtr index(int) const { return nullptr; }  // exact times (timestamp sync)
+    // Last frame of the run of decoded frames starting at `from` (from - 1 if it is missing).
+    virtual int32_t cachedRunEnd(int slot, int32_t from) const;
 };
 
 class EngineBackend final : public PlaybackBackend {
@@ -38,6 +40,7 @@ public:
     FramePtr frame(int slot, int32_t n) const override { return m_engine.frame(slot, n); }
     void request(int slot, const PlaybackIntent& intent) override { m_engine.request(slot, intent); }
     FrameIndexPtr index(int slot) const override { return m_engine.index(slot); }
+    int32_t cachedRunEnd(int slot, int32_t from) const override;
 
 private:
     Engine& m_engine;
@@ -129,6 +132,7 @@ private:
     void setPosition(int64_t p, int direction);
     int64_t clampPosition(int64_t p) const;
     bool ready(const TimelineMapper& m, int64_t position) const;
+    std::array<int32_t, 2> paceLimits(const TimelineMapper& m) const;
 
     PlaybackBackend& m_backend;
     int64_t m_position = 0;

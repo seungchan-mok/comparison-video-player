@@ -29,6 +29,31 @@ double EngineBackend::frameRate(int slot) const
     return idx && idx->frameRate() > 0 ? idx->frameRate() : 25.0;
 }
 
+int32_t PlaybackBackend::cachedRunEnd(int slot, int32_t from) const
+{
+    int32_t last = from - 1;
+    while (last < from + 4096 && frame(slot, last + 1))
+        ++last;
+    return last;
+}
+
+int32_t EngineBackend::cachedRunEnd(int slot, int32_t from) const
+{
+    RangeSetPtr rs = m_engine.cachedRanges(slot);
+    if (!rs)
+        return from - 1;
+    const auto& r = rs->ranges;
+    auto it = std::upper_bound(r.begin(), r.end(), from, [](int32_t v, const FrameRange& x) { return v < x.first; });
+    if (it == r.begin() || !std::prev(it)->contains(from))
+        return from - 1;
+    --it;
+    int32_t last = it->last;
+    // Runs split where frames move between memory tiers; they are still contiguous.
+    for (++it; it != r.end() && it->first == last + 1; ++it)
+        last = it->last;
+    return last;
+}
+
 PlaybackController::PlaybackController(PlaybackBackend& backend)
     : m_backend(backend)
 {
@@ -121,9 +146,40 @@ void PlaybackController::mediaChanged()
     requestAll();
 }
 
+// Leader/follower pacing while two videos play: playback needs both frames of a position, so
+// decoding much further ahead in one video than the other is decoded only takes decoder time
+// and cache from the slower one. The faster video prefetches up to a second past the
+// position the slower one has decoded to.
+std::array<int32_t, 2> PlaybackController::paceLimits(const TimelineMapper& m) const
+{
+    std::array<int32_t, 2> limits{-1, -1};
+    if (!m_playing || !m.bothOpen())
+        return limits;
+    const int64_t n = m.length();
+    std::array<int64_t, 2> readyTo{};
+    for (int s = 0; s < 2; ++s) {
+        const TimelineMapper::Local l = m.local(s, m_position);
+        const int64_t endFrame = m_backend.cachedRunEnd(s, l.frame);
+        const int32_t lastFrame = m.local(s, n - 1).frame;
+        // Decoded to its last frame: held from there on, nothing more to decode for the timeline.
+        readyTo[size_t(s)] = endFrame >= lastFrame ? n : std::max<int64_t>(m_position, m.positionOf(s, endFrame));
+    }
+    const int64_t lead = std::max<int64_t>(8, int64_t(std::ceil(m.fps() * m_speed)));
+    for (int s = 0; s < 2; ++s) {
+        const int64_t follower = readyTo[size_t(1 - s)];
+        if (follower >= n)
+            continue;
+        const TimelineMapper::Local l = m.local(s, std::min(n - 1, follower + lead));
+        if (!l.hold || l.frame > m.local(s, m_position).frame)
+            limits[size_t(s)] = l.frame;
+    }
+    return limits;
+}
+
 void PlaybackController::requestAll()
 {
     const TimelineMapper m = mapper();
+    const std::array<int32_t, 2> limits = paceLimits(m);
     for (int s = 0; s < 2; ++s) {
         if (!m_backend.isOpen(s))
             continue;
@@ -137,6 +193,7 @@ void PlaybackController::requestAll()
             in.loopActive = m_loopActive;
         }
         in.jumpDistances = {jumpFrames(false), jumpFrames(true)};
+        in.aheadLimit = limits[size_t(s)];
         m_backend.request(s, in);
     }
 }
