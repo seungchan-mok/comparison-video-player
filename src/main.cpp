@@ -57,7 +57,9 @@ int main(int argc, char* argv[])
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addPositionalArgument(QStringLiteral("A"), QStringLiteral("Video to open (slot A)"), QStringLiteral("[A]"));
-    // Deterministic end-to-end checks without a visible window (QT_QPA_PLATFORM=offscreen).
+    QCommandLineOption cacheMb(QStringLiteral("cache-mb"), QStringLiteral("Decoded frame cache budget for this run (MB)."), QStringLiteral("MB"));
+    parser.addOption(cacheMb);
+    // Deterministic end-to-end checks on a virtual display (scripts/xvfb-run.sh).
     QCommandLineOption debugGrab(QStringLiteral("debug-grab"), QStringLiteral("Save the video view to PNG, then quit."), QStringLiteral("png"));
     QCommandLineOption debugAfter(QStringLiteral("debug-after"), QStringLiteral("Milliseconds before --debug-grab (default 1000)."), QStringLiteral("ms"), QStringLiteral("1000"));
     QCommandLineOption debugSeek(QStringLiteral("debug-seek"), QStringLiteral("Seek to this frame after opening."), QStringLiteral("frame"));
@@ -75,6 +77,8 @@ int main(int argc, char* argv[])
     std::fprintf(stderr, "scvp %s, Qt %s, %s\n", SCVP_VERSION, qVersion(), qPrintable(ffmpegVersionString()));
 
     scvp::ui::MainWindow window;
+    if (parser.isSet(cacheMb))
+        window.overrideCacheBudget(size_t(parser.value(cacheMb).toULongLong()) << 20);
     if (parser.isSet(debugSize)) {
         const QStringList wh = parser.value(debugSize).split(QLatin1Char('x'));
         if (wh.size() == 2)

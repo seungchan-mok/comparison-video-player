@@ -20,6 +20,10 @@ QImage grab(const QString& file, const QStringList& extra, QString* log)
     const QString png = dir.filePath(QStringLiteral("grab.png"));
     QProcess p;
     p.setProcessChannelMode(QProcess::MergedChannels);
+    // Never touch the user's real settings.
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("XDG_CONFIG_HOME"), dir.filePath(QStringLiteral("config")));
+    p.setProcessEnvironment(env);
     QStringList args{QStringLiteral(SCVP_APP_PATH), file, QStringLiteral("--debug-size"), QStringLiteral("700x600"),
                      QStringLiteral("--debug-grab"), png};
     args += extra;

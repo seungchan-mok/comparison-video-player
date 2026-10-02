@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/KeyMap.h"
+#include "ui/Settings.h"
 
 #include <QMainWindow>
 
@@ -25,9 +26,20 @@ public:
 
     void handleAction(Action a, bool autoRepeat);
     void toggleFullscreen();
+    void openDialog(int slot);
+    void showSettings();
+    void applySettings(const AppSettings& s);
+    void overrideCacheBudget(size_t bytes);  // command line: this run only
+
+protected:
+    void dragEnterEvent(QDragEnterEvent* e) override;
+    void dropEvent(QDropEvent* e) override;
+    void closeEvent(QCloseEvent* e) override;
 
 private:
     void updateTitle();
+    void createMenus();
+    QAction* playerAction(QMenu* menu, Action a);
 
     VideoView* m_view;
     Player* m_player;
@@ -35,6 +47,8 @@ private:
     Stage* m_stage;
     HudOverlay* m_hud;
     KeyRouter* m_keys;
+    AppSettings m_settings;
+    QList<QPair<QAction*, Action>> m_menuActions;
 };
 
 } // namespace scvp::ui

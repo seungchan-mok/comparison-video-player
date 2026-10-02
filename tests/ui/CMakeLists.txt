@@ -1,3 +1,4 @@
 scvp_add_test(tst_keyrouter tst_keyrouter.cpp LIBS scvp::ui)
 scvp_add_test(tst_timeline tst_timeline.cpp LIBS scvp::ui)
 scvp_add_test(tst_stage tst_stage.cpp LIBS scvp::ui)
+scvp_add_test(tst_settings tst_settings.cpp LIBS scvp::ui)

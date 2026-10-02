@@ -7,6 +7,8 @@ add_library(scvp_ui STATIC
     KeyRouter.h KeyRouter.cpp
     MainWindow.h MainWindow.cpp
     Player.h Player.cpp
+    Settings.h Settings.cpp
+    SettingsDialog.h SettingsDialog.cpp
     Stage.h Stage.cpp
     TimelineModel.h
     TimelineWidget.h TimelineWidget.cpp

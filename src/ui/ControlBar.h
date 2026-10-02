@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/PlaybackController.h"
+
 #include <QTimer>
 #include <QWidget>
 
@@ -21,6 +23,7 @@ public:
     explicit ControlBar(Player* player, QWidget* parent = nullptr);
 
     TimelineWidget* timeline() const { return m_timeline; }
+    void setJumpSettings(const JumpSettings& j);  // updates the fields without re-applying
     void setOverlay(bool overlay);  // translucent dark background over the video
     bool hasActivePopup() const;    // a combo box list is open (keep an overlay visible)
 

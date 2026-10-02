@@ -132,6 +132,16 @@ ControlBar::ControlBar(Player* player, QWidget* parent)
     syncPosition();
 }
 
+void ControlBar::setJumpSettings(const JumpSettings& j)
+{
+    const QSignalBlocker b1(m_jumpSmall);
+    const QSignalBlocker b2(m_jumpLarge);
+    const QSignalBlocker b3(m_jumpUnit);
+    m_jumpSmall->setValue(j.small);
+    m_jumpLarge->setValue(j.large);
+    m_jumpUnit->setCurrentIndex(j.inFrames ? 1 : 0);
+}
+
 void ControlBar::applyJumps()
 {
     JumpSettings j;
