@@ -41,6 +41,7 @@ const std::array<ActionInfo, size_t(Action::Count)> kInfo = {{
     {"fullscreen", "Fullscreen", Repeat::None},
     {"exit_fullscreen", "Exit fullscreen", Repeat::None},
     {"smooth_scaling", "Smooth fractional zoom", Repeat::None},
+    {"legend", "A/B legend", Repeat::None},
 }};
 
 bool isSymbolKey(int key)
@@ -86,7 +87,7 @@ KeyMap KeyMap::defaults()
     set(Action::GoToEnd, {QKeyCombination(none, Qt::Key_End)});
     set(Action::LoopIn, {QKeyCombination(none, Qt::Key_BracketLeft)});
     set(Action::LoopOut, {QKeyCombination(none, Qt::Key_BracketRight)});
-    set(Action::LoopToggle, {QKeyCombination(none, Qt::Key_L)});
+    set(Action::LoopToggle, {QKeyCombination(ctrl, Qt::Key_L)});
     set(Action::LoopClear, {QKeyCombination(shift, Qt::Key_L)});
     set(Action::ViewCycle, {QKeyCombination(none, Qt::Key_V)});
     set(Action::ViewSideBySide, {QKeyCombination(none, Qt::Key_S)});
@@ -104,6 +105,7 @@ KeyMap KeyMap::defaults()
     set(Action::PixelValueMode, {QKeyCombination(none, Qt::Key_Y)});
     set(Action::InfoOverlay, {QKeyCombination(none, Qt::Key_I)});
     set(Action::SmoothScaling, {QKeyCombination(none, Qt::Key_N)});  // N: nearest (sharp) <-> smooth
+    set(Action::Legend, {QKeyCombination(none, Qt::Key_L)});
 #if defined(Q_OS_MACOS)
     // Ctrl+Cmd+F (Qt: Meta = Ctrl key, Control = Cmd key); F11 is Show Desktop on macOS.
     set(Action::Fullscreen, {QKeyCombination(none, Qt::Key_F), QKeyCombination(Qt::MetaModifier | ctrl, Qt::Key_F)});
@@ -135,9 +137,25 @@ QString KeyMap::text(Action a) const
     return parts.join(QStringLiteral(", "));
 }
 
+namespace {
+
+// Default bindings that changed: a saved binding equal to the old default was never chosen by the
+// user, so settings older than `version` get the new default instead.
+constexpr int kKeysVersion = 2;
+const struct {
+    Action action;
+    int version;
+    const char* oldDefault;
+} kChangedDefaults[] = {
+    {Action::LoopToggle, 2, "L"},  // L became the A/B legend; loop on/off moved to Ctrl+L
+};
+
+} // namespace
+
 void KeyMap::save(QSettings& s) const
 {
     s.beginGroup(QStringLiteral("keys"));
+    s.setValue(QStringLiteral("version"), kKeysVersion);
     for (size_t a = 0; a < m_keys.size(); ++a) {
         QStringList parts;
         for (const QKeyCombination& c : m_keys[a])
@@ -150,9 +168,15 @@ void KeyMap::save(QSettings& s) const
 void KeyMap::load(QSettings& s)
 {
     s.beginGroup(QStringLiteral("keys"));
+    const int version = s.value(QStringLiteral("version"), 1).toInt();
     for (size_t a = 0; a < m_keys.size(); ++a) {
         const QString v = s.value(QLatin1String(kInfo[a].id)).toString();
         if (!s.contains(QLatin1String(kInfo[a].id)))
+            continue;
+        bool outdated = false;
+        for (const auto& c : kChangedDefaults)
+            outdated |= size_t(c.action) == a && version < c.version && v == QLatin1String(c.oldDefault);
+        if (outdated)
             continue;
         QList<QKeyCombination> keys;
         for (const QString& part : v.split(QStringLiteral("; "), Qt::SkipEmptyParts)) {

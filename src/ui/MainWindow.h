@@ -65,6 +65,7 @@ private:
     std::optional<RawVideoParams> m_rawOverride;
     QList<QPair<QAction*, Action>> m_menuActions;
     QAction* m_smoothAction = nullptr;
+    QAction* m_legendAction = nullptr;
 };
 
 } // namespace scvp::ui

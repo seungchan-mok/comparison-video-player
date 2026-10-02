@@ -152,7 +152,22 @@ void MainWindow::handleAction(Action a, bool)
     case Action::ViewFlip:
     case Action::ViewDifference:
     case Action::DiffGainUp:
-    case Action::DiffGainDown: setCompare(nextCompare(m_view->compare(), a, m_view->layout().orientation)); break;
+    case Action::DiffGainDown: {
+        const render::CompareSettings before = m_view->compare();
+        const render::CompareSettings after = nextCompare(before, a, m_view->layout().orientation);
+        setCompare(after);
+        // Flipping: say clearly which video is on screen now.
+        const bool flipped = after.mode == render::CompareMode::Flip &&
+                             (before.mode != render::CompareMode::Flip || before.flipShowsB != after.flipShowsB);
+        if (flipped && m_player->slotOpen(0) && m_player->slotOpen(1))
+            m_hud->flashSlot(after.flipShowsB ? 1 : 0);
+        break;
+    }
+    case Action::Legend:
+        m_settings.legend = !m_settings.legend;
+        m_hud->setLegendVisible(m_settings.legend);
+        syncViewActions();
+        break;
     case Action::SmoothScaling:
         m_settings.smoothScaling = !m_settings.smoothScaling;
         m_view->setSmoothScaling(m_settings.smoothScaling);
@@ -315,6 +330,8 @@ void MainWindow::createMenus()
     for (Action a : {Action::PixelValues, Action::PixelValueMode})
         playerAction(view, a);
     view->addSeparator();
+    m_legendAction = playerAction(view, Action::Legend);
+    m_legendAction->setCheckable(true);
     for (Action a : {Action::InfoOverlay, Action::Fullscreen})
         playerAction(view, a);
 
@@ -383,6 +400,8 @@ void MainWindow::syncViewActions()
 {
     if (m_smoothAction)
         m_smoothAction->setChecked(m_settings.smoothScaling);
+    if (m_legendAction)
+        m_legendAction->setChecked(m_settings.legend);
 }
 
 void MainWindow::applySettings(const AppSettings& s)
@@ -396,6 +415,7 @@ void MainWindow::applySettings(const AppSettings& s)
     if (s.vramMb)
         m_player->engine().setGpuMemoryBudget(s.vramBytes());
     m_view->setSmoothScaling(s.smoothScaling);
+    m_hud->setLegendVisible(s.legend);
     syncViewActions();
     m_player->setJumpSettings(s.jumps);
     m_controls->setJumpSettings(s.jumps);

@@ -14,6 +14,12 @@
 #include <cmath>
 
 namespace scvp::ui {
+namespace {
+
+constexpr qint64 kFlashMs = 1000;      // flip indicator: fully visible, then fading out
+constexpr qint64 kFlashSolidMs = 550;
+
+} // namespace
 
 HudOverlay::HudOverlay(Player* player, QWidget* parent)
     : QWidget(parent)
@@ -32,6 +38,14 @@ HudOverlay::HudOverlay(Player* player, QWidget* parent)
         update();
     });
     m_rateClock.start();
+    m_flashTimer.setInterval(16);
+    connect(&m_flashTimer, &QTimer::timeout, this, [this] {
+        if (m_flashClock.elapsed() > kFlashMs) {
+            m_flashSlot = -1;
+            m_flashTimer.stop();
+        }
+        update();
+    });
     m_stallDelay.setSingleShot(true);
     m_stallDelay.setInterval(100);  // brief waits do not flash a badge
     connect(&m_stallDelay, &QTimer::timeout, this, [this] {
@@ -62,6 +76,28 @@ void HudOverlay::setInfoVisible(bool on)
     m_info = on;
     on ? m_refresh.start() : m_refresh.stop();
     update();
+}
+
+QColor HudOverlay::slotColor(int slot) { return slot == 0 ? QColor(255, 138, 61) : QColor(41, 182, 197); }
+
+void HudOverlay::setLegendVisible(bool on)
+{
+    m_legend = on;
+    update();
+}
+
+void HudOverlay::flashSlot(int slot)
+{
+    m_flashSlot = slot;
+    m_flashClock.restart();
+    m_flashTimer.start();
+    update();
+}
+
+QString HudOverlay::slotName(int slot) const
+{
+    const QFileInfo fi(QString::fromStdString(m_player->engine().info(slot).path));
+    return fi.fileName().isEmpty() ? fi.filePath() : fi.fileName();
 }
 
 void HudOverlay::setPixelText(const QString& text)
@@ -233,6 +269,122 @@ void HudOverlay::paintPaneLabels(QPainter& p, const QFontMetrics& fm)
     }
 }
 
+// Legend: a coloured A/B chip and the file name in each part of the view (for wipe: A at the
+// left edge, B at the right; for the difference: both). Kept clear of the info box.
+void HudOverlay::paintLegend(QPainter& p, const QRect& avoid)
+{
+    auto* view = qobject_cast<const VideoView*>(parentWidget());
+    if (!view || (!m_player->slotOpen(0) && !m_player->slotOpen(1)))
+        return;
+    QFont nameFont = font();
+    nameFont.setPointSizeF(nameFont.pointSizeF() * 1.2);
+    QFont chipFont = nameFont;
+    chipFont.setBold(true);
+    const QFontMetrics fm(nameFont);
+    const int h = fm.height() + 10;
+    const int pad = 6;
+
+    // A legend entry: [chip] name [chip] name ... (one or two videos), right-aligned if asked.
+    auto entry = [&](QPoint at, const QList<int>& ids, bool right, const QString& suffix, int maxWidth) {
+        QList<QString> names;
+        int w = pad;
+        const int nameRoom = std::max(60, (maxWidth - int(ids.size()) * (h + 2 * pad)) / std::max<int>(1, int(ids.size())));
+        for (int slot : ids) {
+            QString n = slotName(slot);
+            if (m_player->shown(slot).hold)
+                n += tr("  HOLD");
+            n = fm.elidedText(n, Qt::ElideMiddle, nameRoom);
+            names << n;
+            w += h - 4 + pad + fm.horizontalAdvance(n) + pad;
+        }
+        if (!suffix.isEmpty())
+            w += fm.horizontalAdvance(suffix) + pad;
+        QRect box(right ? at.x() - w : at.x(), at.y(), w, h);
+        if (box.intersects(avoid))
+            box.moveTop(avoid.bottom() + 8);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0, 0, 0, 170));
+        p.drawRoundedRect(box, 6, 6);
+        int x = box.left() + pad;
+        for (int i = 0; i < ids.size(); ++i) {
+            const int slot = ids[i];
+            const QRect chip(x, box.top() + 2, h - 4, h - 4);
+            p.setBrush(slotColor(slot));
+            p.drawRoundedRect(chip, 4, 4);
+            p.setFont(chipFont);
+            p.setPen(QColor(20, 20, 24));
+            p.drawText(chip, Qt::AlignCenter, slot == 0 ? QStringLiteral("A") : QStringLiteral("B"));
+            x = chip.right() + 1 + pad;
+            p.setFont(nameFont);
+            p.setPen(m_player->shown(slot).hold ? QColor(255, 200, 90) : QColor(245, 245, 245));
+            p.drawText(QRect(x, box.top(), fm.horizontalAdvance(names[i]) + 1, h), Qt::AlignVCenter | Qt::AlignLeft, names[i]);
+            x += fm.horizontalAdvance(names[i]) + pad;
+            p.setPen(Qt::NoPen);
+        }
+        if (!suffix.isEmpty()) {
+            p.setFont(nameFont);
+            p.setPen(QColor(200, 200, 200));
+            p.drawText(QRect(x, box.top(), fm.horizontalAdvance(suffix) + 1, h), Qt::AlignVCenter | Qt::AlignLeft, suffix);
+            p.setPen(Qt::NoPen);
+        }
+    };
+
+    const double dpr = view->devicePixelRatioF();
+    const render::CompareLayout layout = view->layout();
+    const render::CompareSettings& c = view->compare();
+    const bool both = m_player->slotOpen(0) && m_player->slotOpen(1);
+    for (const render::Pane& pane : layout.panes) {
+        const QRect r(QPoint(int(pane.rect.x() / dpr), int(pane.rect.y() / dpr)),
+                      QSize(int(pane.rect.width() / dpr), int(pane.rect.height() / dpr)));
+        const int room = r.width() - 20;
+        const QPoint topLeft(r.left() + 10, r.top() + 10);
+        if (!both || layout.panes.size() > 1 || c.mode == render::CompareMode::Flip) {
+            entry(topLeft, {pane.slot}, false, QString(), room);
+        } else if (c.mode == render::CompareMode::Wipe) {
+            entry(topLeft, {0}, false, QString(), room / 2 - 10);
+            entry(QPoint(r.right() - 10, r.top() + 10), {1}, true, QString(), room / 2 - 10);
+        } else {
+            entry(topLeft, {0, 1}, false, QStringLiteral("|A-B| x%1").arg(c.diffGain), room);
+        }
+    }
+}
+
+// The flip indicator: which video is on screen now, big, fading out.
+void HudOverlay::paintFlash(QPainter& p)
+{
+    if (m_flashSlot < 0 || !m_player->slotOpen(m_flashSlot))
+        return;
+    const qint64 t = m_flashClock.elapsed();
+    if (t > kFlashMs)
+        return;
+    const double alpha = t < kFlashSolidMs ? 1.0 : 1.0 - double(t - kFlashSolidMs) / double(kFlashMs - kFlashSolidMs);
+    const int big = std::clamp(height() / 5, 40, 140);
+    QFont letterFont = font();
+    letterFont.setPixelSize(int(big * 0.7));
+    letterFont.setBold(true);
+    QFont nameFont = font();
+    nameFont.setPointSizeF(nameFont.pointSizeF() * 1.3);
+    const QFontMetrics nfm(nameFont);
+    const QString name = nfm.elidedText(slotName(m_flashSlot), Qt::ElideMiddle, width() - 80);
+    const int w = std::max(big + 40, nfm.horizontalAdvance(name) + 40);
+    const int h = big + nfm.height() + 44;
+    const QRect box((width() - w) / 2, (height() - h) / 2, w, h);
+    p.setOpacity(alpha);
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0, 0, 0, 180));
+    p.drawRoundedRect(box, 14, 14);
+    const QRect chip(box.center().x() - big / 2, box.top() + 16, big, big);
+    p.setBrush(slotColor(m_flashSlot));
+    p.drawRoundedRect(chip, big / 6, big / 6);
+    p.setFont(letterFont);
+    p.setPen(QColor(20, 20, 24));
+    p.drawText(chip, Qt::AlignCenter, m_flashSlot == 0 ? QStringLiteral("A") : QStringLiteral("B"));
+    p.setFont(nameFont);
+    p.setPen(QColor(245, 245, 245));
+    p.drawText(QRect(box.left(), chip.bottom() + 8, box.width(), nfm.height() + 8), Qt::AlignCenter, name);
+    p.setOpacity(1.0);
+}
+
 // Breaks a line that does not fit after a path separator (else a space, else where the width
 // runs out); continuations are indented.
 QStringList HudOverlay::wrapLine(const QString& line, const QFontMetrics& fm, int maxWidth)
@@ -267,10 +419,27 @@ QStringList HudOverlay::wrapLine(const QString& line, const QFontMetrics& fm, in
 void HudOverlay::paintEvent(QPaintEvent*)
 {
     QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing);
     const QFont mono = QFontDatabase::systemFont(QFontDatabase::FixedFont);
     p.setFont(mono);
     const QFontMetrics fm(mono);
-    paintPaneLabels(p, fm);
+    // The info box first decides its place, so the legend can stay clear of it.
+    QStringList infoLines;
+    QRect infoBox;
+    if (m_info) {
+        for (const QString& l : lines())
+            infoLines << wrapLine(l, fm, std::max(200, width() - 32));
+        int w = 0;
+        for (const QString& l : infoLines)
+            w = std::max(w, fm.horizontalAdvance(l));
+        infoBox = QRect(8, 8, w + 16, fm.lineSpacing() * int(infoLines.size()) + 12);
+    }
+    if (m_legend) {
+        paintLegend(p, infoBox);
+        p.setFont(mono);
+    } else {
+        paintPaneLabels(p, fm);
+    }
     if (!m_pixelText.isEmpty()) {
         const int h = fm.height() + 8;
         const QRect box(0, height() - h, std::min(width(), fm.horizontalAdvance(m_pixelText) + 16), h);
@@ -279,17 +448,11 @@ void HudOverlay::paintEvent(QPaintEvent*)
         p.drawText(box.adjusted(8, 0, 0, 0), Qt::AlignVCenter | Qt::AlignLeft, m_pixelText);
     }
     if (m_info) {
-        QStringList ls;
-        for (const QString& l : lines())
-            ls << wrapLine(l, fm, std::max(200, width() - 32));
-        int w = 0;
-        for (const QString& l : ls)
-            w = std::max(w, fm.horizontalAdvance(l));
-        const QRect box(8, 8, w + 16, fm.lineSpacing() * int(ls.size()) + 12);
+        const QRect box = infoBox;
         p.fillRect(box, QColor(0, 0, 0, 170));
         p.setPen(QColor(235, 235, 235));
         int y = box.top() + 6 + fm.ascent();
-        for (const QString& l : ls) {
+        for (const QString& l : infoLines) {
             p.drawText(box.left() + 8, y, l);
             y += fm.lineSpacing();
         }
@@ -301,6 +464,7 @@ void HudOverlay::paintEvent(QPaintEvent*)
         p.setPen(Qt::white);
         p.drawText(box, Qt::AlignCenter, t);
     }
+    paintFlash(p);
 }
 
 } // namespace scvp::ui

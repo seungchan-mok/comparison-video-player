@@ -98,7 +98,7 @@ ControlBar::ControlBar(Player* player, QWidget* parent)
     m_loop->setCheckable(true);
     m_loop->setFocusPolicy(Qt::NoFocus);
     m_loop->setAutoRaise(true);
-    m_loop->setToolTip(tr("Loop on/off (L); set with [ and ]"));
+    m_loop->setToolTip(tr("Loop on/off (Ctrl+L); set with [ and ], clear with Shift+L"));
     connect(m_loop, &QToolButton::clicked, m_player, &Player::toggleLoop);
     m_loopLabel->setFont(mono);
     m_cache->setFont(mono);

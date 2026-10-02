@@ -17,6 +17,7 @@ AppSettings AppSettings::load()
     a.jumps.large = s.value(QStringLiteral("jump/large"), a.jumps.large).toDouble();
     a.jumps.inFrames = s.value(QStringLiteral("jump/in_frames"), a.jumps.inFrames).toBool();
     a.smoothScaling = s.value(QStringLiteral("view/smooth_scaling"), a.smoothScaling).toBool();
+    a.legend = s.value(QStringLiteral("view/legend"), a.legend).toBool();
     a.keys.load(s);
     a.lastDir = s.value(QStringLiteral("ui/last_dir")).toString();
     a.geometry = s.value(QStringLiteral("ui/geometry")).toByteArray();
@@ -33,6 +34,7 @@ void AppSettings::save() const
     s.setValue(QStringLiteral("jump/large"), jumps.large);
     s.setValue(QStringLiteral("jump/in_frames"), jumps.inFrames);
     s.setValue(QStringLiteral("view/smooth_scaling"), smoothScaling);
+    s.setValue(QStringLiteral("view/legend"), legend);
     keys.save(s);
     s.setValue(QStringLiteral("ui/last_dir"), lastDir);
     s.setValue(QStringLiteral("ui/geometry"), geometry);

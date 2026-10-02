@@ -27,6 +27,12 @@ public:
     void reposition();
     void setPixelText(const QString& text);  // pixel inspector line ("" hides it)
     QString pixelText() const { return m_pixelText; }
+    // A/B legend: each part of the view names its video (coloured A/B chip + file name).
+    void setLegendVisible(bool on);
+    bool legendVisible() const { return m_legend; }
+    // A large A or B in the middle of the view for a moment (flipping between the videos).
+    void flashSlot(int slot);
+    static QColor slotColor(int slot);
 
 protected:
     void paintEvent(QPaintEvent* e) override;
@@ -36,6 +42,9 @@ private:
     QStringList lines() const;
     QString pathText(int slot) const;
     void paintPaneLabels(QPainter& p, const QFontMetrics& fm);
+    void paintLegend(QPainter& p, const QRect& avoid);
+    void paintFlash(QPainter& p);
+    QString slotName(int slot) const;
     static QStringList wrapLine(const QString& line, const QFontMetrics& fm, int maxWidth);
     void sampleRates();  // refresh timer: frame rates over the last second
     QString perfLine() const;
@@ -54,6 +63,10 @@ private:
     double m_paintMs = 0;
     double m_uploadMs = 0;
     double m_convertMs = 0;
+    bool m_legend = false;
+    int m_flashSlot = -1;
+    QElapsedTimer m_flashClock;
+    QTimer m_flashTimer;
     bool m_info = false;
     bool m_stalled = false;
     bool m_showStall = false;

@@ -232,6 +232,60 @@ private slots:
         QCOMPARE(m.captured(5).toInt(), int(uchar(uv[1])));
     }
 
+    // L: each pane names its video with a coloured chip (A orange, B teal).
+    void legendMarksBothVideos()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        const auto a = test::fixture(QStringLiteral("h264_b"));
+        const auto b = test::fixture(QStringLiteral("hevc_opengop"));
+        QString log;
+        const QImage img = grab({a->path, b->path},
+                                {QStringLiteral("--view"), QStringLiteral("sbs"), QStringLiteral("--debug-actions"), QStringLiteral("legend"),
+                                 QStringLiteral("--debug-grab-window"), QStringLiteral("--debug-after"), QStringLiteral("1500")},
+                                &log);
+        if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
+            QSKIP("Xvfb not available");
+        QVERIFY2(!img.isNull(), qPrintable(log));
+        auto count = [&](QRect r, QColor want) {
+            int n = 0;
+            for (int y = r.top(); y <= r.bottom(); ++y)
+                for (int x = r.left(); x <= r.right(); ++x) {
+                    const QColor c = img.pixelColor(x, y);
+                    n += std::abs(c.red() - want.red()) + std::abs(c.green() - want.green()) + std::abs(c.blue() - want.blue()) < 12 ? 1 : 0;
+                }
+            return n;
+        };
+        const QRect leftTop(0, 0, img.width() / 2, img.height() / 3), rightTop(img.width() / 2, 0, img.width() / 2, img.height() / 3);
+        const QColor orange(255, 138, 61), teal(41, 182, 197);
+        QVERIFY2(count(leftTop, orange) > 150, qPrintable(QString::number(count(leftTop, orange))));
+        QVERIFY2(count(rightTop, teal) > 150, qPrintable(QString::number(count(rightTop, teal))));
+        QVERIFY(count(leftTop, teal) < 20);
+    }
+
+    // Flipping shows a large chip of the video now on screen in the middle of the view.
+    void flipShowsWhichVideo()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        const auto a = test::fixture(QStringLiteral("h264_b"));
+        const auto b = test::fixture(QStringLiteral("hevc_opengop"));
+        QString log;
+        const QImage img = grab({a->path, b->path},
+                                {QStringLiteral("--debug-actions"), QStringLiteral("view_flip"), QStringLiteral("--debug-grab-window"),
+                                 QStringLiteral("--debug-after"), QStringLiteral("500")},
+                                &log);
+        if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
+            QSKIP("Xvfb not available");
+        QVERIFY2(!img.isNull(), qPrintable(log));
+        int teal = 0;
+        const QRect mid(img.width() / 3, img.height() / 4, img.width() / 3, img.height() / 2);
+        for (int y = mid.top(); y <= mid.bottom(); ++y)
+            for (int x = mid.left(); x <= mid.right(); ++x) {
+                const QColor c = img.pixelColor(x, y);
+                teal += std::abs(c.red() - 41) + std::abs(c.green() - 182) + std::abs(c.blue() - 197) < 12 ? 1 : 0;
+            }
+        QVERIFY2(teal > 2000, qPrintable(QString::number(teal)));  // entering flip shows B first
+    }
+
     // Hovering reads the pixel back from the GPU: synced A and B agree and match the decoder.
     void inspectorReadsThePixelUnderTheCursor()
     {

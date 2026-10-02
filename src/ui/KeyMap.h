@@ -45,6 +45,7 @@ enum class Action {
     Fullscreen,
     ExitFullscreen,
     SmoothScaling,
+    Legend,
     Count
 };
 

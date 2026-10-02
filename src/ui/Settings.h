@@ -18,6 +18,7 @@ struct AppSettings {
     QString hwdec = QStringLiteral("gpu");  // "gpu" (GPU first), "cpu", or a device name ("cuda", ...)
     JumpSettings jumps;
     bool smoothScaling = true;  // bilinear at fractional zooms such as fit to window
+    bool legend = false;        // A/B legend with file names over the video (L)
     KeyMap keys = KeyMap::defaults();
     QString lastDir;
     QByteArray geometry;

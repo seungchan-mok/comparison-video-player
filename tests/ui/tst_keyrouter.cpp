@@ -26,7 +26,8 @@ private slots:
         QCOMPARE(m.match(Qt::Key_Comma, Qt::NoModifier), std::optional<Action>(Action::StepBack));
         QCOMPARE(m.match(Qt::Key_Less, Qt::ShiftModifier), std::optional<Action>(Action::OffsetMinus));
         QCOMPARE(m.match(Qt::Key_Greater, Qt::ShiftModifier), std::optional<Action>(Action::OffsetPlus));
-        QCOMPARE(m.match(Qt::Key_L, Qt::NoModifier), std::optional<Action>(Action::LoopToggle));
+        QCOMPARE(m.match(Qt::Key_L, Qt::NoModifier), std::optional<Action>(Action::Legend));
+        QCOMPARE(m.match(Qt::Key_L, Qt::ControlModifier), std::optional<Action>(Action::LoopToggle));
         QCOMPARE(m.match(Qt::Key_L, Qt::ShiftModifier), std::optional<Action>(Action::LoopClear));
         QCOMPARE(m.match(Qt::Key_Left, Qt::KeypadModifier), std::optional<Action>(Action::JumpBack));
         QCOMPARE(m.match(Qt::Key_Plus, Qt::ShiftModifier), std::optional<Action>(Action::ZoomIn));
@@ -60,6 +61,34 @@ private slots:
         QCOMPARE(back.keys(Action::StepForward), m.keys(Action::StepForward));
         QCOMPARE(back.match(Qt::Key_D, Qt::ControlModifier), std::optional<Action>(Action::ViewDifference));
         QCOMPARE(back.keys(Action::PlayPause), m.keys(Action::PlayPause));
+    }
+
+    // Settings saved before L became the legend still hold loop_toggle=L: that old default moves
+    // to the new one, while a binding the user chose stays.
+    void outdatedDefaultsMove()
+    {
+        QTemporaryDir dir;
+        {
+            QSettings s(dir.filePath(QStringLiteral("old.ini")), QSettings::IniFormat);
+            s.setValue(QStringLiteral("keys/loop_toggle"), QStringLiteral("L"));
+            s.setValue(QStringLiteral("keys/zoom_fit"), QStringLiteral("Z"));
+            KeyMap m = KeyMap::defaults();
+            m.load(s);
+            QCOMPARE(m.match(Qt::Key_L, Qt::NoModifier), std::optional<Action>(Action::Legend));
+            QCOMPARE(m.match(Qt::Key_L, Qt::ControlModifier), std::optional<Action>(Action::LoopToggle));
+            QCOMPARE(m.match(Qt::Key_Z, Qt::NoModifier), std::optional<Action>(Action::ZoomFit));
+        }
+        {
+            // Saved by this version: loop_toggle=L is the user's own choice now.
+            QSettings s(dir.filePath(QStringLiteral("new.ini")), QSettings::IniFormat);
+            KeyMap saved = KeyMap::defaults();
+            saved.setKeys(Action::Legend, {});
+            saved.setKeys(Action::LoopToggle, {QKeyCombination(Qt::NoModifier, Qt::Key_L)});
+            saved.save(s);
+            KeyMap m = KeyMap::defaults();
+            m.load(s);
+            QCOMPARE(m.match(Qt::Key_L, Qt::NoModifier), std::optional<Action>(Action::LoopToggle));
+        }
     }
 
     void routesKeysAndGatesRepeats()
