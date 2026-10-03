@@ -4,7 +4,8 @@
 #
 #   tests/fixtures/gen_fixtures.sh [OUT_DIR] [--bench]
 #
-# Needs an ffmpeg CLI with libx264, libx265, libvpx, libsvtav1, libaom (Ubuntu's ffmpeg has all).
+# Needs an ffmpeg CLI with libx264, libx265, libvpx, libsvtav1 (Ubuntu's ffmpeg has all). libaom is
+# optional: Homebrew's ffmpeg lacks it, and the av1_aom clip is then skipped.
 # Override the binary with FFMPEG=/path/to/ffmpeg. --bench additionally renders a large 4K HEVC
 # 10-bit clip with a 250-frame GOP for scvp-bench.
 #
@@ -31,6 +32,9 @@ SRC="testsrc2=size=320x240:rate=30,noise=alls=12:allf=t+u"
 SRC_LAVFI=(-f lavfi -i "$SRC")
 
 ff() { SVT_LOG=0 "$FF" -nostdin -hide_banner -loglevel error -y "$@"; }
+# `-h encoder=X` exits 0 either way; only a known encoder prints its "Encoder X" header. (Not
+# piped into grep -q: ffmpeg would die of SIGPIPE, which pipefail turns into "missing".)
+has_encoder() { [[ "$("$FF" -hide_banner -h "encoder=$1" 2>/dev/null)" == "Encoder $1 "* ]]; }
 
 # ref <name> <kind> <path> <open-args> <ffmpeg input args...>
 ref() {
@@ -73,8 +77,14 @@ ref vp9 container vp9.webm - -i vp9.webm
 ff "${SRC_LAVFI[@]}" -t 4 -c:v libsvtav1 -preset 12 -g 60 av1_svt.mkv
 ref av1_svt container av1_svt.mkv - -i av1_svt.mkv
 
-ff "${SRC_LAVFI[@]}" -t 2 -c:v libaom-av1 -cpu-used 8 -b:v 500k -g 30 -lag-in-frames 19 av1_aom.mkv
-ref av1_aom container av1_aom.mkv - -i av1_aom.mkv
+# No test names this clip (it is one more row in the decode-every-fixture tests), so it may be
+# missing; the clips tests open by name (vp9, av1_svt, ...) stay mandatory.
+if has_encoder libaom-av1; then
+  ff "${SRC_LAVFI[@]}" -t 2 -c:v libaom-av1 -cpu-used 8 -b:v 500k -g 30 -lag-in-frames 19 av1_aom.mkv
+  ref av1_aom container av1_aom.mkv - -i av1_aom.mkv
+else
+  printf '  %-22s skipped (no libaom-av1 encoder)\n' av1_aom
+fi
 
 ff "${SRC_LAVFI[@]}" -t 4 -c:v prores_ks -profile:v 2 -pix_fmt yuv422p10le prores.mov
 ref prores container prores.mov - -i prores.mov

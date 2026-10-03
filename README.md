@@ -132,7 +132,7 @@ File → Settings: 디코딩(GPU 우선 / CPU / 장치 지정), 메모리 캐시
 ## 테스트
 
 ```bash
-tests/fixtures/gen_fixtures.sh   # 테스트 영상 + ffmpeg framemd5 기준값 생성 (x264/x265/libvpx/svtav1/libaom 필요)
+tests/fixtures/gen_fixtures.sh   # 테스트 영상 + ffmpeg framemd5 기준값 생성 (x264/x265/libvpx/svtav1 필요, libaom은 있으면 사용)
 ctest --preset dev
 ```
 
