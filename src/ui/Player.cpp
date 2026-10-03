@@ -31,6 +31,11 @@ Player::~Player()
     m_pacer->setActive(false);
     for (int s = 0; s < Engine::kSlots; ++s)
         m_engine.close(s);
+    // The bridge is a QObject child, so ~QObject would delete it only after m_engine is
+    // destroyed, and its destructor locks the engine's mutex to unregister the callbacks (macOS
+    // aborts on the dead mutex). Delete it here: with every slot closed, no decode or index thread
+    // can still be running a copy of its callback.
+    delete m_bridge;
 }
 
 bool Player::open(int slot, const QString& path, const InputOptions& opts, QString* error)
