@@ -64,8 +64,6 @@ jobs:
 
   windows:
     runs-on: windows-2022
-    env:
-      FFMPEG_URL: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-win64-lgpl-shared-7.1.zip
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
@@ -76,8 +74,18 @@ jobs:
           cache: true
       - name: FFmpeg
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          Invoke-WebRequest $env:FFMPEG_URL -OutFile ffmpeg.zip
+          # BtbN's "latest" release only carries the newest release branches (the pinned n7.1 asset
+          # was dropped), so take the newest nX.Y LGPL shared build; never master, whose API moves.
+          $asset = gh release view latest -R BtbN/FFmpeg-Builds --json assets -q '.assets[].name' |
+            Where-Object { $_ -match '^ffmpeg-n\d+\.\d+-latest-win64-lgpl-shared-' } |
+            Sort-Object { [version]($_ -replace '^ffmpeg-n(\d+\.\d+)-.*$', '$1') } |
+            Select-Object -Last 1
+          if (-not $asset) { throw 'no win64 LGPL shared release build in BtbN/FFmpeg-Builds' }
+          Write-Host "FFmpeg: $asset"
+          gh release download latest -R BtbN/FFmpeg-Builds -p $asset -O ffmpeg.zip
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg
           $root = (Get-ChildItem ffmpeg -Directory | Select-Object -First 1).FullName
           "FFMPEG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
