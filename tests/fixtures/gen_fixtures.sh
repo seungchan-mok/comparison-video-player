@@ -131,8 +131,9 @@ ref ts_discont container ts_discont.ts - -i ts_discont.ts
 ff -ss 1.1 -i mpeg2.ts -c copy -copyinkf -f mpegts ts_midgop.ts
 ref ts_midgop container ts_midgop.ts - -i ts_midgop.ts
 
-ff "${SRC_LAVFI[@]}" -t 4 -vf "tinterlace=mode=interleave_top" -c:v mpeg2video -q:v 4 \
-   -flags +ilme+ildct -top 1 -bf 2 -g 15 -f mpegts interlaced.ts
+# Field order via setfield: FFmpeg 9 dropped the -top option.
+ff "${SRC_LAVFI[@]}" -t 4 -vf "tinterlace=mode=interleave_top,setfield=tff" -c:v mpeg2video -q:v 4 \
+   -flags +ilme+ildct -bf 2 -g 15 -f mpegts interlaced.ts
 ref interlaced_ts container interlaced.ts - -i interlaced.ts
 
 # --- raw elementary streams (no container timestamps) -------------------------------------
