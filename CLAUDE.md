@@ -69,7 +69,7 @@ PlaybackController (UI 스레드, 타임라인 위치)
 ### GPU 경로
 
 - `CudaApi` 는 CUDA 드라이버 API를 실행 중에 로드합니다(`libcuda.so.1`/`nvcuda.dll`). 그래서 CUDA 툴킷이 필요 없고, NVIDIA가 아닌 머신에서는 없다고만 보고합니다.
-- `HwDevice` 는 하드웨어 장치 컨텍스트를 프로세스 전체에서 공유합니다. GPU 우선 디코딩은 규격상 비트 정확한 코덱에만 쓰고, 그 외에는 소프트웨어로 디코딩합니다.
+- `HwDevice` 는 하드웨어 장치 컨텍스트를 프로세스 전체에서 공유합니다. GPU 우선 디코딩은 규격상 비트 정확한 코덱에만 쓰고, 그 외에는 소프트웨어로 디코딩합니다. 장치가 실제로 규격대로 디코딩하는지는 (장치, 코덱, 픽셀 형식)마다 처음 한 번 키 프레임을 소프트웨어 결과와 비교해 확인하고(`FFmpegDecodeSession::verifyHardware`, 결과는 `HwDevices::verdict`), 다르면 그 조합은 프로세스가 끝날 때까지 소프트웨어로 디코딩합니다. 확인 전의 하드웨어 프레임은 표시하지 않습니다(예: GitHub macOS VM의 VideoToolbox는 8비트 HEVC 색차가 다름).
 - CUDA에서는 프레임이 VRAM에 머물 수 있고(`FrameLocation::Cuda`, RAM으로 스필되는 VRAM 캐시 계층), 렌더는 이를 `CudaInteropSource` 로 zero-copy 매핑합니다. 나머지는 모두 `CpuUploadSource`(텍스처 더블 버퍼)를 거칩니다.
 - 렌더: `TextureSource` -> `RgbConverter`(`convert.frag`: 픽셀 값 오버레이용 원본 코드값도 보존, GPU Bayer 디모자이크) -> 표시 패스(`display.frag`: 비교 모드, 숫자, 커서 픽셀 테두리) -> 비동기 `PixelReadback`. 셰이더가 읽지 못하는 형식은 swscale로 먼저 변환합니다.
 

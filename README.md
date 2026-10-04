@@ -16,7 +16,7 @@ SCVP (Simple Comparison Video Player): 두 영상을 프레임 단위로 정확�
 | 2영상 비교 | 동기 재생/이동(lockstep: 두 프레임이 모두 준비돼야 표시), B 오프셋, 범위를 벗어난 영상은 첫/끝 프레임 HOLD, 좌우/위아래·와이프·A/B 전환·차이(배율) |
 | 픽셀 값 | 충분히 확대하면 각 픽셀에 RGB 값(원본 비트 심도) 또는 원본 코드값(YUV 등)을 숫자로 표시, 차이 모드는 부호 있는 A−B. 커서 아래 픽셀은 두 영상 모두 테두리 표시 + 하단에 값 표시(Ctrl+C 복사) |
 | 색 해석 | 영상별 YUV 행렬(BT.601/709/2020)·범위(limited/full) 재지정, 크로마 최근접(기본, 값 정확)/bilinear |
-| GPU | GPU 우선 하드웨어 디코딩(NVDEC/VAAPI/D3D11VA/VideoToolbox, 비트 정확한 코덱만), NVIDIA는 CUDA-GL interop zero-copy 표시. 색 변환·확대·비교·숫자·디모자이크는 모두 셰이더 |
+| GPU | GPU 우선 하드웨어 디코딩(NVDEC/VAAPI/D3D11VA/VideoToolbox, 비트 정확한 코덱만. 처음 한 번 소프트웨어 결과와 비교해 다르면 자동으로 소프트웨어), NVIDIA는 CUDA-GL interop zero-copy 표시. 색 변환·확대·비교·숫자·디모자이크는 모두 셰이더 |
 | 전체화면 | `F`/더블클릭, 컨트롤 오버레이 자동 숨김 |
 
 ## 빌드

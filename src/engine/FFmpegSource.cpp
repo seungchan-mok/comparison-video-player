@@ -3,6 +3,7 @@
 #include "engine/ImageSequenceSource.h"
 #include "engine/RawVideoSource.h"
 
+#include "engine/FrameCompare.h"
 #include "engine/GpuFrame.h"
 #include "engine/HwDevice.h"
 #include "engine/Log.h"
@@ -10,6 +11,7 @@
 #include <algorithm>
 #include <chrono>
 #include <atomic>
+#include <future>
 #include <set>
 #include <thread>
 
@@ -66,7 +68,9 @@ public:
         m_hwType = AV_HWDEVICE_TYPE_NONE;
         m_hwPixFmt = AV_PIX_FMT_NONE;
         m_hwFailed = false;
+        m_hwRejected = false;
         m_hwErrors = 0;
+        m_verifyPending = false;
         const AVCodec* codec = nullptr;
         AVBufferRef* device = nullptr;
         if (tryHardware && m_cfg.hw.policy == HwPolicy::GpuFirst && !HwDevices::bitExactCodec(id))
@@ -82,12 +86,16 @@ public:
                 const AVPixelFormat hwFmt = c ? hardwareFormat(c, t) : AV_PIX_FMT_NONE;
                 if (hwFmt == AV_PIX_FMT_NONE)
                     continue;
+                const HwVerdict v = HwDevices::instance().verdict(t, id, st->codecpar->format);
+                if (m_cfg.hw.policy == HwPolicy::GpuFirst && v == HwVerdict::Differs)
+                    continue;
                 device = HwDevices::instance().get(t);
                 if (!device)
                     continue;
                 codec = c;
                 m_hwType = t;
                 m_hwPixFmt = hwFmt;
+                m_verifyPending = m_cfg.hw.policy == HwPolicy::GpuFirst && v == HwVerdict::Unknown;
                 break;
             }
         }
@@ -130,6 +138,7 @@ public:
                 *error = "avcodec_open2: " + ff::errorString(err);
             return false;
         }
+        m_ctxClean = true;
         return true;
     }
 
@@ -165,7 +174,8 @@ public:
     // Reopens the decoder in software and restarts from the last seek point.
     bool fallBackToSoftware()
     {
-        SCVP_WARN("%s: hardware decoding (%s) failed, switching to software", m_path.c_str(), HwDevices::name(m_hwType));
+        if (!m_hwRejected)
+            SCVP_WARN("%s: hardware decoding (%s) failed, switching to software", m_path.c_str(), HwDevices::name(m_hwType));
         std::string err;
         m_ctx.reset();
         if (!openCodec(false, &err)) {
@@ -222,6 +232,16 @@ public:
                 if (lb.pres < 0) {
                     av_frame_unref(m_frame.get());
                     continue;  // a frame that is never shown
+                }
+                if (hwFrame && m_verifyPending) {
+                    // A hardware picture before any key picture could be checked (the stream
+                    // starts mid-GOP, say): GPU-first never shows unchecked pixels.
+                    SCVP_INFO("%s: %s output could not be checked yet, decoding in software", m_path.c_str(),
+                              HwDevices::name(m_hwType));
+                    av_frame_unref(m_frame.get());
+                    m_hwRejected = true;
+                    m_hwFailed = true;
+                    continue;
                 }
                 if (m_gpuBackoff > 0)
                     --m_gpuBackoff;
@@ -282,6 +302,7 @@ private:
     void resetDecoder()
     {
         avcodec_flush_buffers(m_ctx.get());
+        m_ctxClean = true;
         av_packet_unref(m_pkt.get());
         m_hasPending = false;
         m_inputEof = false;
@@ -366,6 +387,7 @@ private:
                 const int ret = av_read_frame(m_demux.fmt.get(), m_pkt.get());
                 if (ret < 0) {
                     avcodec_send_packet(m_ctx.get(), nullptr);  // drain
+                    m_ctxClean = false;
                     m_inputEof = true;
                     return true;
                 }
@@ -378,6 +400,11 @@ private:
             m_hasPending = true;
         }
         m_pkt->opaque = reinterpret_cast<void*>(intptr_t(m_pendingDec) + 1);
+        if (m_verifyPending && m_ctxClean && (m_pkt->flags & AV_PKT_FLAG_KEY)) {
+            verifyHardware();
+            if (m_hwFailed)
+                return true;  // next() reopens in software and restarts from the last seek point
+        }
         m_ctx->skip_frame = skipFor(m_pendingDec, hints);
         if (m_ctx->skip_frame != AVDISCARD_DEFAULT && m_pendingDec >= 0) {
             m_skipped.insert(m_pendingDec);
@@ -386,6 +413,7 @@ private:
                 m_skipped.erase(m_skipped.begin());
         }
         const int ret = avcodec_send_packet(m_ctx.get(), m_pkt.get());
+        m_ctxClean = false;
         if (ret == AVERROR(EAGAIN))
             return true;  // keep the packet; output must be drained first
         av_packet_unref(m_pkt.get());
@@ -431,6 +459,82 @@ private:
         if (!unneeded && ip.pres >= 0)
             unneeded = hints.frameNeeded ? !(*hints.frameNeeded)(ip.pres) : ip.pres < hints.skipNonRefBelow;
         return unneeded ? AVDISCARD_NONREF : AVDISCARD_DEFAULT;
+    }
+
+    // GPU-first promises the pixels software decoding gives. The codecs it uses guarantee that
+    // for conforming decoders, but not every device conforms (VideoToolbox in GitHub's macOS VMs
+    // gets 8-bit HEVC chroma wrong while luma and 10-bit are exact). So before the first hardware
+    // frame of a (device, codec, pixel format) is shown, the key picture about to be sent is
+    // decoded both ways and compared; the verdict holds for the rest of the process. Only a key
+    // picture decodes on its own, and only a clean decoder (just opened or flushed) can be
+    // drained for it and flushed again without losing its place in the stream.
+    void verifyHardware()
+    {
+        const AVStream* st = m_demux.videoStream();
+        const AVCodecID id = st->codecpar->codec_id;
+        // An edit list's pre-roll key packet is flagged for discarding: decode its picture anyway.
+        ff::PacketPtr key = ff::makePacket();
+        if (!key || av_packet_ref(key.get(), m_pkt.get()) < 0)
+            return;
+        key->flags &= ~AV_PKT_FLAG_DISCARD;
+        // The software decode (12 ms for a 4K HEVC picture) runs while the device decodes. The
+        // future's destructor waits for it on every return path.
+        auto software = std::async(std::launch::async, [this, &key] { return decodeInSoftware(key.get()); });
+        ff::FramePtr hw = decodeAlone(m_ctx.get(), key.get());
+        if (m_hwFailed || !hw || hw->format != m_hwPixFmt)
+            return;  // hardware set-up failed (the usual fallback follows) or no picture: next key
+        ff::FramePtr got = ff::makeFrame();
+        if (av_hwframe_transfer_data(got.get(), hw.get(), 0) < 0 || av_frame_copy_props(got.get(), hw.get()) < 0)
+            return;
+        if (got->crop_top || got->crop_left)
+            av_frame_apply_cropping(got.get(), AV_FRAME_CROP_UNALIGNED);
+        ff::FramePtr want = software.get();
+        if (!want)
+            return;
+        if (m_cfg.hw.simulateMismatch && av_frame_make_writable(got.get()) >= 0)
+            got->data[0][0] ^= 1;
+        const bool same = samePixelValues(got.get(), want.get());
+        HwDevices::instance().setVerdict(m_hwType, id, st->codecpar->format, same ? HwVerdict::Exact : HwVerdict::Differs);
+        m_verifyPending = false;
+        const char* fmt = av_get_pix_fmt_name(static_cast<AVPixelFormat>(st->codecpar->format));
+        if (same) {
+            SCVP_INFO("%s: %s decodes %s %s exactly like software", m_path.c_str(), HwDevices::name(m_hwType),
+                      avcodec_get_name(id), fmt ? fmt : "?");
+        } else {
+            SCVP_WARN("%s: %s decodes %s %s differently from software: using software for these streams",
+                      m_path.c_str(), HwDevices::name(m_hwType), avcodec_get_name(id), fmt ? fmt : "?");
+            m_hwRejected = true;
+            m_hwFailed = true;
+        }
+    }
+
+    // The first picture `ctx` outputs for `pkt` alone (sent, drained); leaves `ctx` flushed.
+    static ff::FramePtr decodeAlone(AVCodecContext* ctx, const AVPacket* pkt)
+    {
+        ff::FramePtr out;
+        ctx->skip_frame = AVDISCARD_DEFAULT;
+        if (avcodec_send_packet(ctx, pkt) >= 0 && avcodec_send_packet(ctx, nullptr) >= 0) {
+            for (ff::FramePtr f = ff::makeFrame(); avcodec_receive_frame(ctx, f.get()) >= 0; f = ff::makeFrame())
+                if (!out)
+                    out = std::move(f);
+        }
+        avcodec_flush_buffers(ctx);
+        return out;
+    }
+
+    ff::FramePtr decodeInSoftware(const AVPacket* pkt) const
+    {
+        const AVStream* st = m_demux.videoStream();
+        const AVCodec* codec = chooseDecoder(st->codecpar->codec_id, false);
+        ff::CodecContextPtr ctx(codec ? avcodec_alloc_context3(codec) : nullptr);
+        if (!ctx || avcodec_parameters_to_context(ctx.get(), st->codecpar) < 0)
+            return nullptr;
+        ctx->pkt_timebase = st->time_base;
+        ctx->thread_type = FF_THREAD_SLICE;  // one picture: frame threads cannot help
+        ctx->thread_count = autoDecoderThreads(st->codecpar->width, st->codecpar->height);
+        if (avcodec_open2(ctx.get(), codec, nullptr) < 0)
+            return nullptr;
+        return decodeAlone(ctx.get(), pkt);
     }
 
     // Copies a hardware surface into a pool frame in system memory (NV12/P010/...), so the
@@ -579,7 +683,10 @@ private:
     AVHWDeviceType m_hwType = AV_HWDEVICE_TYPE_NONE;
     AVPixelFormat m_hwPixFmt = AV_PIX_FMT_NONE;
     std::atomic<bool> m_hwFailed{false};
+    bool m_hwRejected = false;  // left on purpose (output differs or is unchecked), already logged
     int m_hwErrors = 0;
+    bool m_verifyPending = false;  // GPU-first hardware whose verdict is still unknown
+    bool m_ctxClean = true;        // nothing sent to m_ctx since it was opened or flushed
     bool m_downloaded = false;
     std::shared_ptr<GpuFramePool> m_gpuPool;
     int m_gpuBackoff = 0;

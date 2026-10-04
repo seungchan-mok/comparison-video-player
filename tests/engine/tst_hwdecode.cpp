@@ -39,6 +39,14 @@ Opened open(const QString& name, HwConfig hw)
     return o;
 }
 
+// What HwDevices recorded for the device `session` uses (or used) on this source's stream.
+HwVerdict verdictFor(const IVideoSource& source, const std::string& device)
+{
+    const AVCodecDescriptor* d = avcodec_descriptor_get_by_name(source.info().codecName.c_str());
+    return HwDevices::instance().verdict(av_hwdevice_find_type_by_name(device.c_str()), d ? d->id : AV_CODEC_ID_NONE,
+                                         source.info().pixelFormat);
+}
+
 void addRows()
 {
     QTest::addColumn<QString>("name");
@@ -59,6 +67,8 @@ private slots:
         if (!haveHardware())
             QSKIP("no hardware decoder on this machine");
     }
+
+    void init() { HwDevices::instance().forgetVerdicts(); }
 
     void sequential_data() { addRows(); }
     void sequential()
@@ -83,6 +93,9 @@ private slots:
             ++expected;
         }
         QCOMPARE(expected, int32_t(o.ref.size()));
+        // Hardware frames are only shown once the device has been checked against software.
+        if (hwFrames)
+            QCOMPARE(int(verdictFor(*o.source, o.session->hardwareDevice())), int(HwVerdict::Exact));
         qInfo("%s: %d/%d frames decoded by %s", qPrintable(name), hwFrames, expected,
               hwFrames ? o.session->hardwareDevice().c_str() : "software");
     }
@@ -139,6 +152,67 @@ private slots:
         }
         QCOMPARE(expected, int32_t(o.ref.size()));
         QCOMPARE(o.session->hardwareDevice(), std::string());
+    }
+
+    // A device whose pictures differ from software decoding (as VideoToolbox's 8-bit HEVC does in
+    // macOS VMs) is caught before it shows a frame, and GPU-first does not use it again.
+    void hardwareThatDiffersIsNotUsed()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        QString name;
+        std::string device;
+        for (const char* n : {"h264_b", "hevc10", "vp9", "av1_svt"}) {
+            Opened probe = open(QString::fromLatin1(n), HwConfig{});
+            FramePtr f;
+            if (probe.session && probe.session->next(f, DecodeHints{}) == DecodeStatus::Ok && f->hardware) {
+                name = QString::fromLatin1(n);
+                device = probe.session->hardwareDevice();
+                QCOMPARE(int(verdictFor(*probe.source, device)), int(HwVerdict::Exact));
+                break;
+            }
+        }
+        if (name.isEmpty())
+            QSKIP("no fixture decodes in hardware here");
+        HwDevices::instance().forgetVerdicts();
+
+        HwConfig differs;
+        differs.simulateMismatch = true;
+        Opened o = open(name, differs);
+        QVERIFY(o.session);
+        int32_t expected = 0;
+        for (;;) {
+            FramePtr f;
+            const DecodeStatus st = o.session->next(f, DecodeHints{});
+            if (st == DecodeStatus::Eof)
+                break;
+            QCOMPARE(int(st), int(DecodeStatus::Ok));
+            QCOMPARE(f->pres, expected);
+            QVERIFY(!f->hardware);
+            QCOMPARE(test::frameMd5(f->av), o.ref[size_t(expected)]);
+            ++expected;
+        }
+        QCOMPARE(expected, int32_t(o.ref.size()));
+        QCOMPARE(o.session->hardwareDevice(), std::string());
+        QCOMPARE(int(verdictFor(*o.source, device)), int(HwVerdict::Differs));
+
+        // Later GPU-first sessions pass that device over (for software, or another device that
+        // gets checked in turn), after seeks too.
+        Opened again = open(name, HwConfig{});
+        QVERIFY(again.session->hardwareDevice() != device);
+        const int32_t t = again.index->frameCount() / 2;
+        QCOMPARE(int(again.session->seekTo(again.index->seekPointFor(t))), int(DecodeStatus::Ok));
+        FramePtr f;
+        QCOMPARE(int(again.session->next(f, DecodeHints{})), int(DecodeStatus::Ok));
+        QVERIFY(again.session->hardwareDevice() != device);
+        QCOMPARE(test::frameMd5AsSoftware(f->av), again.ref[size_t(f->pres)]);
+
+        // Choosing the device explicitly still uses it: that policy accepts its output as is.
+        HwConfig explicitDevice;
+        explicitDevice.policy = HwPolicy::Device;
+        explicitDevice.device = av_hwdevice_find_type_by_name(device.c_str());
+        Opened chosen = open(name, explicitDevice);
+        QCOMPARE(int(chosen.session->next(f, DecodeHints{})), int(DecodeStatus::Ok));
+        QVERIFY(f->hardware);
     }
 };
 

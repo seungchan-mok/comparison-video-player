@@ -6,6 +6,7 @@ add_library(scvp_engine STATIC
     Frame.h
     FrameAllocator.h FrameAllocator.cpp
     FrameCache.h FrameCache.cpp
+    FrameCompare.h FrameCompare.cpp
     DecodeLane.h DecodeLane.cpp
     Demux.h Demux.cpp
     Engine.h Engine.cpp

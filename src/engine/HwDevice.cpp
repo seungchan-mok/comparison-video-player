@@ -64,6 +64,25 @@ AVBufferRef* HwDevices::get(AVHWDeviceType type)
     return e.ref ? av_buffer_ref(e.ref) : nullptr;
 }
 
+HwVerdict HwDevices::verdict(AVHWDeviceType type, AVCodecID codec, int pixelFormat)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const auto it = m_verdicts.find({int(type), int(codec), pixelFormat});
+    return it != m_verdicts.end() ? it->second : HwVerdict::Unknown;
+}
+
+void HwDevices::setVerdict(AVHWDeviceType type, AVCodecID codec, int pixelFormat, HwVerdict v)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_verdicts[{int(type), int(codec), pixelFormat}] = v;
+}
+
+void HwDevices::forgetVerdicts()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_verdicts.clear();
+}
+
 bool HwDevices::available(AVHWDeviceType type)
 {
     AVBufferRef* r = get(type);
