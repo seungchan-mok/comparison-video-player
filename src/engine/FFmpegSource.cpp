@@ -491,9 +491,7 @@ private:
         ff::FramePtr want = software.get();
         if (!want)
             return;
-        if (m_cfg.hw.simulateMismatch && av_frame_make_writable(got.get()) >= 0)
-            got->data[0][0] ^= 1;
-        const bool same = samePixelValues(got.get(), want.get());
+        const bool same = !m_cfg.hw.simulateMismatch && samePixelValues(got.get(), want.get());
         HwDevices::instance().setVerdict(m_hwType, id, st->codecpar->format, same ? HwVerdict::Exact : HwVerdict::Differs);
         m_verifyPending = false;
         const char* fmt = av_get_pix_fmt_name(static_cast<AVPixelFormat>(st->codecpar->format));
