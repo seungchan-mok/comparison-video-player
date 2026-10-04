@@ -1,0 +1,20 @@
+# build trees
+/build*/
+/out/
+CMakeUserPresets.json
+compile_commands.json
+
+# local no-root dependency prefix (see scripts/fetch-ubuntu-deps.sh)
+/.deps/
+
+# generated test media
+/tests/fixtures/out/
+
+# editors
+.vscode/
+.idea/
+*.user
+.cache/
+
+# packaged bundles (scripts/package-linux.sh)
+/dist/

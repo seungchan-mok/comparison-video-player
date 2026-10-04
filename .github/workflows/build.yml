@@ -1,0 +1,109 @@
+name: build
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    # Ubuntu 24.04 ships the oldest supported Qt (6.4) and FFmpeg (6.1): the API floor.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build pkg-config \
+            qt6-base-dev libgl-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
+            ffmpeg xvfb xauth libgl1-mesa-dri mesa-utils
+      - name: Configure
+        run: cmake --preset dev
+      - name: Build
+        run: cmake --build --preset dev
+      - name: Test fixtures
+        run: tests/fixtures/gen_fixtures.sh
+      - name: Test
+        # GL tests need a display: run everything on Xvfb with Mesa's llvmpipe (no GPU on CI;
+        # hardware-decoding and CUDA tests skip themselves).
+        run: scripts/xvfb-run.sh ctest --preset dev
+      - name: Package
+        run: |
+          cmake --preset release
+          cmake --build --preset release
+          cd build/release && cpack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scvp-linux
+          path: build/release/scvp-*.tar.gz
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: brew install qt ffmpeg ninja pkg-config
+      - name: Configure
+        run: cmake --preset dev -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+      - name: Build
+        run: cmake --build --preset dev
+      - name: Test fixtures
+        run: tests/fixtures/gen_fixtures.sh
+      - name: Test
+        run: ctest --preset dev
+      - name: Package
+        run: |
+          cmake --preset release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+          cmake --build --preset release
+          cd build/release && cpack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scvp-macos
+          path: build/release/scvp-*.dmg
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          arch: win64_msvc2022_64
+          cache: true
+      - name: FFmpeg
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # BtbN's "latest" release only carries the newest release branches (the pinned n7.1 asset
+          # was dropped), so take the newest nX.Y LGPL shared build; never master, whose API moves.
+          $asset = gh release view latest -R BtbN/FFmpeg-Builds --json assets -q '.assets[].name' |
+            Where-Object { $_ -match '^ffmpeg-n\d+\.\d+-latest-win64-lgpl-shared-' } |
+            Sort-Object { [version]($_ -replace '^ffmpeg-n(\d+\.\d+)-.*$', '$1') } |
+            Select-Object -Last 1
+          if (-not $asset) { throw 'no win64 LGPL shared release build in BtbN/FFmpeg-Builds' }
+          Write-Host "FFmpeg: $asset"
+          gh release download latest -R BtbN/FFmpeg-Builds -p $asset -O ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg
+          $root = (Get-ChildItem ffmpeg -Directory | Select-Object -First 1).FullName
+          "FFMPEG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$root\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+      - name: Configure
+        run: cmake --preset dev -DFFMPEG_ROOT="${{ env.FFMPEG_ROOT }}"
+      - name: Build
+        run: cmake --build --preset dev
+      - name: Test
+        # Without fixtures (the LGPL FFmpeg build has no x264/x265 encoders): unit tests only.
+        run: ctest --preset dev
+      - name: Package
+        run: |
+          cmake --preset release -DFFMPEG_ROOT="${{ env.FFMPEG_ROOT }}"
+          cmake --build --preset release
+          cd build/release
+          cpack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scvp-windows
+          path: build/release/scvp-*.zip

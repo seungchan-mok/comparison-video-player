@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=SCVP
+GenericName=Comparison Video Player
+GenericName[ko]=비교 영상 플레이어
+Comment=Frame-accurate comparison of two videos with pixel values
+Comment[ko]=두 영상을 프레임 단위로 비교하고 픽셀 값을 확인합니다
+Icon=scvp
+TryExec=scvp
+Exec=scvp %F
+Terminal=false
+StartupNotify=true
+StartupWMClass=scvp
+Categories=AudioVideo;Video;Player;
+Keywords=video;player;compare;diff;frame;pixel;yuv;raw;
+Keywords[ko]=비디오;영상;플레이어;비교;프레임;픽셀;
+MimeType=video/mp4;video/x-m4v;video/x-matroska;video/webm;video/quicktime;video/vnd.avi;video/x-msvideo;video/avi;video/mpeg;video/x-mpeg2;video/mp2t;video/vnd.dlna.mpeg-tts;video/x-flv;video/x-ms-wmv;video/x-ms-asf;application/mxf;video/3gpp;video/3gpp2;video/ogg;video/x-ogm+ogg;video/x-theora+ogg;video/dv;video/x-h264;video/x-h265;video/x-yuv4mpeg;video/x-ivf;video/x-av1-obu;video/x-raw-yuv;
