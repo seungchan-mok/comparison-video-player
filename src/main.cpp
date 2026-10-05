@@ -1,5 +1,6 @@
 #include "engine/FfmpegCompat.h"
 #include "ui/AppIcon.h"
+#include "ui/HudOverlay.h"
 #include "ui/KeyMap.h"
 #include "ui/MainWindow.h"
 
@@ -116,6 +117,10 @@ int main(int argc, char* argv[])
     parser.addOption(vramMb);
     QCommandLineOption hwdec(QStringLiteral("hwdec"), QStringLiteral("Decoding for this run: gpu (default), cpu, or a device (cuda, vaapi, d3d11va, videotoolbox)."), QStringLiteral("mode"));
     parser.addOption(hwdec);
+    QCommandLineOption legendA(QStringLiteral("legend-a"), QStringLiteral("Name A in the legend instead of its file name (shows the legend)."), QStringLiteral("text"));
+    parser.addOption(legendA);
+    QCommandLineOption legendB(QStringLiteral("legend-b"), QStringLiteral("Name B in the legend instead of its file name (shows the legend)."), QStringLiteral("text"));
+    parser.addOption(legendB);
     // Deterministic end-to-end checks on a virtual display (scripts/xvfb-run.sh).
     QCommandLineOption debugGrab(QStringLiteral("debug-grab"), QStringLiteral("Save the video view to PNG, then quit."), QStringLiteral("png"));
     QCommandLineOption debugAfter(QStringLiteral("debug-after"), QStringLiteral("Milliseconds before --debug-grab (default 1000)."), QStringLiteral("ms"), QStringLiteral("1000"));
@@ -199,6 +204,11 @@ int main(int argc, char* argv[])
         if (parser.isSet(debugPlay))
             window.player()->togglePlay();
     }
+    // After opening: opening a file clears the name its slot had.
+    if (parser.isSet(legendA))
+        window.setLegendText(0, parser.value(legendA).trimmed());
+    if (parser.isSet(legendB))
+        window.setLegendText(1, parser.value(legendB).trimmed());
     if (parser.isSet(debugActions)) {
         const QStringList ids = parser.value(debugActions).split(QLatin1Char(','), Qt::SkipEmptyParts);
         QTimer::singleShot(200, &window, [&window, ids] {
@@ -226,6 +236,9 @@ int main(int argc, char* argv[])
             std::fprintf(stderr, "debug-grab: %s %dx%d -> %s (frame %lld)\n", ok ? "saved" : "FAILED", img.width(), img.height(),
                          qPrintable(out), (long long)window.player()->controller().position());
             std::fprintf(stderr, "debug-inspector: %s\n", qPrintable(window.inspectorText()));
+            const scvp::ui::HudOverlay* hud = window.hud();
+            std::fprintf(stderr, "debug-legend: %s, A \"%s\", B \"%s\"\n", hud->legendVisible() ? "on" : "off",
+                         qPrintable(hud->slotName(0)), qPrintable(hud->slotName(1)));
             QApplication::exit(ok ? 0 : 1);
         });
     }

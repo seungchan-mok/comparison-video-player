@@ -262,6 +262,33 @@ private slots:
         QVERIFY(count(leftTop, teal) < 20);
     }
 
+    // --legend-a/--legend-b name the videos in the legend and turn it on; the names follow their
+    // videos when A and B are swapped.
+    void legendShowsUserText()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        const auto a = test::fixture(QStringLiteral("h264_b"));
+        const auto b = test::fixture(QStringLiteral("hevc_opengop"));
+        QString log;
+        const QImage img = grab({a->path, b->path},
+                                {QStringLiteral("--view"), QStringLiteral("sbs"), QStringLiteral("--legend-a"), QStringLiteral("기준 x264"),
+                                 QStringLiteral("--legend-b"), QStringLiteral(" new (crf 20) "), QStringLiteral("--debug-actions"),
+                                 QStringLiteral("swap_ab"), QStringLiteral("--debug-grab-window"), QStringLiteral("--debug-after"),
+                                 QStringLiteral("1500")},
+                                &log);
+        if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
+            QSKIP("Xvfb not available");
+        QVERIFY2(!img.isNull(), qPrintable(log));
+        QVERIFY2(log.contains(QStringLiteral("debug-legend: on, A \"new (crf 20)\", B \"기준 x264\"")), qPrintable(log));
+        int orange = 0;  // the legend is on screen without pressing L: A's chip, top left
+        for (int y = 0; y < img.height() / 3; ++y)
+            for (int x = 0; x < img.width() / 2; ++x) {
+                const QColor c = img.pixelColor(x, y);
+                orange += std::abs(c.red() - 255) + std::abs(c.green() - 138) + std::abs(c.blue() - 61) < 12 ? 1 : 0;
+            }
+        QVERIFY2(orange > 150, qPrintable(QString::number(orange)));
+    }
+
     // Flipping shows a large chip of the video now on screen in the middle of the view.
     void flipShowsWhichVideo()
     {

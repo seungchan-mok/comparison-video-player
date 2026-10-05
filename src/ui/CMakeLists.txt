@@ -7,6 +7,7 @@ add_library(scvp_ui STATIC
     HudOverlay.h HudOverlay.cpp
     KeyMap.h KeyMap.cpp
     KeyRouter.h KeyRouter.cpp
+    LegendDialog.h LegendDialog.cpp
     MainWindow.h MainWindow.cpp
     OpenRawDialog.h OpenRawDialog.cpp
     PixelInspector.h PixelInspector.cpp
