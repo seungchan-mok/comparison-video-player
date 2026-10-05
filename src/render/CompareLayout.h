@@ -32,14 +32,16 @@ struct Pane {
 };
 
 // Divides the framebuffer for the comparison mode. Split panes have equal sizes so one view
-// transform maps both pixel-identically; the divider between them is kDivider px wide.
+// transform maps both pixel-identically; the divider between them is kDivider px wide on screen
+// (wider when the view is drawn larger than the screen, as for a capture).
 struct CompareLayout {
     static constexpr int kDivider = 2;
 
     std::vector<Pane> panes;
     SplitOrientation orientation = SplitOrientation::SideBySide;  // resolved (Split only)
 
-    static CompareLayout compute(const CompareSettings& s, QSize framebuffer, QSizeF image, bool hasA, bool hasB);
+    static CompareLayout compute(const CompareSettings& s, QSize framebuffer, QSizeF image, bool hasA, bool hasB,
+                                 int divider = kDivider);
     // The pane containing a device pixel, or the nearest one.
     const Pane* paneAt(QPointF device) const;
     QSize paneSize() const { return panes.empty() ? QSize(1, 1) : panes.front().rect.size(); }

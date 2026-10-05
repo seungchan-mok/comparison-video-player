@@ -28,6 +28,12 @@ public:
     void panBy(QPointF deviceDelta);
     // Rescales after a devicePixelRatio change (same logical view).
     void scaleDevice(double ratio);
+    // The same view on a device `factor` times larger (an offscreen capture): the scale and the
+    // translation as drawn (whole pixels) multiplied, without refitting to a rounded viewport or
+    // clamping, so at a whole factor every screen pixel becomes an exact factor x factor block.
+    // A scale that lands within rounding of a whole number becomes that number, so a capture
+    // meant to show the image 1:1 samples exact pixels.
+    ViewTransform scaled(double factor) const;
 
     double scale() const { return m_scale; }
     QPointF translation() const { return m_t; }

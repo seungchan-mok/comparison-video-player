@@ -30,6 +30,12 @@ std::array<int, 3> src(const AVFrame* f, int x, int y)
     return {p[0], p[1], p[2]};
 }
 
+std::array<int, 3> rgb(const QImage& img, int x, int y)
+{
+    const QRgb p = img.pixel(x, y);
+    return {qRed(p), qGreen(p), qBlue(p)};
+}
+
 } // namespace
 
 class TstDisplay : public QObject {
@@ -290,6 +296,76 @@ private slots:
         for (int y = 0; y < 96; ++y)
             for (int x = 1; x < 128; ++x)
                 QCOMPARE(m_target.at(px, x, y), src(big->av, x, y));
+    }
+
+    // A capture at the screen's size is the screen, pixel for pixel (here wipe at a fractional,
+    // smoothed fit), and leaves the screen's layout as it was.
+    void captureAtScreenSizeIsTheScreen()
+    {
+        CompareSettings c;
+        c.mode = CompareMode::Wipe;
+        c.wipe = 0.37;
+        RenderState s = compareState(100, 60, c);
+        QCOMPARE(s.view.scale(), 1.25);
+        m_renderer.render(s, m_target.fbo);
+        const auto px = m_target.read(m_gl.gl());
+        const QRect pane = m_renderer.layout().panes.at(0).rect;
+        const QImage img = m_renderer.capture(s, 1.0);
+        QCOMPARE(img.size(), QSize(100, 60));
+        for (int y = 0; y < 60; ++y)
+            for (int x = 0; x < 100; ++x)
+                QCOMPARE(rgb(img, x, y), m_target.at(px, x, y));
+        QCOMPARE(m_renderer.layout().panes.at(0).rect, pane);
+    }
+
+    // Minified on screen (from the mip chain), the video is captured at 1:1: every source pixel.
+    void captureShowsMinifiedVideoAtFullDetail()
+    {
+        RenderState s = stateFor(40, 30);
+        QCOMPARE(s.view.scale(), 0.625);
+        const double f = Renderer::captureFactor(s, Renderer::kMaxCaptureSide, Renderer::kMaxCapturePixels);
+        QCOMPARE(f, 1.6);
+        const QImage img = m_renderer.capture(s, f);
+        QCOMPARE(img.size(), QSize(64, 48));
+        for (int y = 0; y < 48; ++y)
+            for (int x = 0; x < 64; ++x)
+                QCOMPARE(rgb(img, x, y), src(m_frame->av, x, y));
+        // Zoomed in and panned: the same part of the image, each screen pixel now 3 x 3.
+        s.view.zoomTo(2.0, QPointF(13, 7));
+        s.view.panBy(QPointF(-5, 3));
+        m_renderer.render(s, m_target.fbo);
+        const auto px = m_target.read(m_gl.gl());
+        const QImage big = m_renderer.capture(s, 3.0);
+        QCOMPARE(big.size(), QSize(120, 90));
+        for (int y = 0; y < 90; ++y)
+            for (int x = 0; x < 120; ++x)
+                QCOMPARE(rgb(big, x, y), m_target.at(px, x / 3, y / 3));
+    }
+
+    // Lines keep their weight on screen: the split divider and the wipe line widen with the capture.
+    void captureWidensTheLines()
+    {
+        CompareSettings c;
+        c.orientation = SplitOrientation::SideBySide;
+        RenderState s = compareState(64 * 2 + CompareLayout::kDivider, 48, c);
+        QCOMPARE(s.view.scale(), 1.0);
+        const QImage split = m_renderer.capture(s, 2.0);
+        QCOMPARE(split.size(), QSize(260, 96));
+        const std::array<int, 3> line{200, 100, 50};
+        for (int y = 0; y < 96; ++y)
+            for (int x = 0; x < 260; ++x) {
+                const auto want = x < 128 ? src(m_frame->av, x / 2, y / 2) : x < 132 ? line : src(m_frameB->av, (x - 132) / 2, y / 2);
+                QCOMPARE(rgb(split, x, y), want);
+            }
+        c.mode = CompareMode::Wipe;
+        c.wipe = 0.25;  // column 16 on screen, 32 and 33 in the capture
+        s = compareState(64, 48, c);
+        const QImage wipe = m_renderer.capture(s, 2.0);
+        for (int y = 0; y < 96; ++y)
+            for (int x = 0; x < 128; ++x) {
+                const auto want = x < 32 ? src(m_frame->av, x / 2, y / 2) : x < 34 ? line : src(m_frameB->av, x / 2, y / 2);
+                QCOMPARE(rgb(wipe, x, y), want);
+            }
     }
 
     void oneVideoIgnoresTheMode()

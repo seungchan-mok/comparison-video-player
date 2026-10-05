@@ -13,6 +13,7 @@
 #include "render/ViewTransform.h"
 
 #include <QColor>
+#include <QImage>
 #include <QRect>
 #include <QSize>
 
@@ -36,7 +37,11 @@ struct RenderState {
     // Pixel under the cursor (view image coordinates): outlined in every pane and read back.
     bool probe = false;
     QPointF probePos;
+    bool sampleProbe = true;         // read the probed pixel back (a capture only outlines it)
     QColor divider{90, 90, 96};      // between split panes, and the wipe line
+    // Lines given in screen pixels (the wipe line, the divider between split panes) are this many
+    // pixels wide per screen pixel: > 1 when the view is drawn larger than the screen.
+    double lineScale = 1.0;
 };
 
 // How the frame on screen reached its textures.
@@ -60,6 +65,24 @@ public:
     bool initialized() const { return m_gl != nullptr; }
 
     void render(const RenderState& state, GLuint targetFbo);
+
+    // Draws the view of `screen` (a state as rendered for the screen) once more, offscreen and
+    // `factor` times larger: the same picture -- zoom, pan, comparison, pixel values, cursor
+    // outline -- with each screen pixel becoming factor x factor pixels, so a video the screen
+    // shows minified can be captured at its full detail. Leaves the screen's results (layout,
+    // timings, read-back) as they were. The context must be current; null when the GPU cannot
+    // allocate the image.
+    QImage capture(const RenderState& screen, double factor);
+    // How much larger than the screen a capture of `state` should be drawn: enough that no shown
+    // video is minified (each of its pixels gets at least one image pixel), never less than 1,
+    // and within maxSide x maxSide and maxPixels.
+    static double captureFactor(const RenderState& state, int maxSide, qint64 maxPixels);
+    // The same, within this GPU's texture and viewport limits.
+    double captureFactor(const RenderState& state, qint64 maxPixels = kMaxCapturePixels) const;
+    // Captures stop here (an 8K frame at 1:1 fits): beyond, memory and encoding time grow
+    // without a screen to show the difference.
+    static constexpr qint64 kMaxCapturePixels = 40'000'000;
+    static constexpr int kMaxCaptureSide = 16384;
 
     const RenderTimings& timings() const { return m_timings; }
     QString error() const { return m_error; }

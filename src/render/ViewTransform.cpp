@@ -129,6 +129,20 @@ void ViewTransform::scaleDevice(double ratio)
     clampTranslation();
 }
 
+ViewTransform ViewTransform::scaled(double factor) const
+{
+    ViewTransform v = *this;
+    v.m_viewport = m_viewport * factor;
+    double s = m_scale * factor;
+    const double whole = std::round(s);
+    if (whole >= 1.0 && std::abs(s - whole) <= 1e-9 * whole)
+        s = whole;
+    v.m_scale = std::clamp(s, kMinScale, kMaxScale);
+    v.m_t = renderTranslation() * factor;
+    v.m_fit = false;  // a later viewport change must not refit
+    return v;
+}
+
 QPointF ViewTransform::renderTranslation() const { return QPointF(std::round(m_t.x()), std::round(m_t.y())); }
 
 QPointF ViewTransform::deviceToImage(QPointF d) const

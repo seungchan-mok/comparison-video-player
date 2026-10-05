@@ -1,9 +1,12 @@
+#include "engine/FrameAllocator.h"
+#include "render/Renderer.h"
 #include "render/ViewTransform.h"
 
 #include <QtTest>
 
 #include <cmath>
 
+using namespace scvp;
 using namespace scvp::render;
 
 class TstViewTransform : public QObject {
@@ -141,6 +144,58 @@ private slots:
                 QCOMPARE(int(std::floor(back.x())), x);
                 QCOMPARE(int(std::floor(back.y())), y);
             }
+    }
+
+    // A capture's transform: the same view, exactly `factor` times larger. A fitted 0.36x
+    // becomes exactly 1:1 (not 0.9999...), so the capture samples exact pixels.
+    void scaledForCaptures()
+    {
+        ViewTransform v;
+        v.setViewportSize({700, 500});
+        v.setImageSize({1920, 1080});
+        const ViewTransform one = v.scaled(1.0 / v.scale());
+        QVERIFY(one.scale() == 1.0);
+        QCOMPARE(one.translation(), v.renderTranslation() / v.scale());
+        QCOMPARE(one.viewportSize(), v.viewportSize() / v.scale());
+        QVERIFY(!one.isFit());
+        // Manual zoom and pan scale as drawn: no refit, no clamping.
+        v.zoomTo(2.0, {100, 100});
+        v.panBy({13.5, -7.25});
+        QVERIFY(v.translation() != v.renderTranslation());
+        const ViewTransform big = v.scaled(2.5);
+        QVERIFY(big.scale() == 5.0);
+        QCOMPARE(big.translation(), v.renderTranslation() * 2.5);
+        QCOMPARE(big.imageSize(), v.imageSize());
+    }
+
+    // Captures render minified videos at 1:1, magnified ones at the screen's size, within limits.
+    void captureFactorShowsEveryPixel()
+    {
+        FramePool pool;
+        auto frame = [&](int w, int h) {
+            auto f = std::make_shared<Frame>();
+            f->av = pool.allocFrame(AV_PIX_FMT_RGB24, w, h);
+            return f;
+        };
+        RenderState s;
+        s.frames[0] = frame(64, 48);
+        s.framebufferSize = QSize(200, 150);
+        s.view.setViewportSize({200, 150});
+        s.view.setImageSize({64, 48});
+        QCOMPARE(Renderer::captureFactor(s, 16384, 40'000'000), 1.0);  // magnified (fit 3.125)
+        s.view.zoomTo(0.25, {0, 0});
+        QCOMPARE(Renderer::captureFactor(s, 16384, 40'000'000), 4.0);
+        QCOMPARE(Renderer::captureFactor(s, 400, 40'000'000), 2.0);  // 200 px x 2 = the side limit
+        QCOMPARE(Renderer::captureFactor(s, 16384, 200 * 150 * 9), 3.0);
+        QCOMPARE(Renderer::captureFactor(s, 100, 40'000'000), 1.0);  // never below the screen
+        // A larger B counts while it is on screen.
+        s.view.zoomTo(1.0, {0, 0});
+        s.frames[1] = frame(128, 96);
+        QCOMPARE(Renderer::captureFactor(s, 16384, 40'000'000), 2.0);
+        s.compare.mode = CompareMode::Flip;
+        QCOMPARE(Renderer::captureFactor(s, 16384, 40'000'000), 1.0);
+        s.compare.flipShowsB = true;
+        QCOMPARE(Renderer::captureFactor(s, 16384, 40'000'000), 2.0);
     }
 };
 

@@ -25,6 +25,7 @@ uniform float lod;     // > 0: minifying, sample this mip level
 uniform vec3 bg;
 uniform int mode;
 uniform float wipeX;   // device px from the viewport's left edge
+uniform vec2 wipeLine; // the line's pixels: from x to y (device px from the left edge)
 uniform float gain;
 uniform vec3 lineColor;
 
@@ -112,7 +113,7 @@ float digitCoverage(vec2 u, ivec3 v)
 void main()
 {
     vec2 p = vec2(gl_FragCoord.x - vp.x, vp.y + vp.w - gl_FragCoord.y);  // pixel centre, top-left origin
-    if (mode == 1 && abs(p.x - wipeX) < 0.5) {
+    if (mode == 1 && p.x > wipeLine.x && p.x < wipeLine.y) {
         o = vec4(lineColor, 1.0);
         return;
     }
