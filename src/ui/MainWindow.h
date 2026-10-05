@@ -11,6 +11,7 @@
 
 namespace scvp::ui {
 
+class ClipboardImage;
 class ControlBar;
 class HudOverlay;
 class KeyRouter;
@@ -44,7 +45,13 @@ public:
     QString inspectorText() const;
     // The legend shows `text` for this video instead of its file name ("" = the file name).
     void setLegendText(int slot, const QString& text);
+    // The view as it looks, as an image on the clipboard (Ctrl+C).
+    void copyView();
     void offerDefaultPlayer();
+
+signals:
+    // The copy is on the clipboard; factor: its size over the screen's device pixels.
+    void viewCopied(QSize size, double factor);
 
 protected:
     void dragEnterEvent(QDragEnterEvent* e) override;
@@ -71,6 +78,8 @@ private:
     QList<QPair<QAction*, Action>> m_menuActions;
     QAction* m_smoothAction = nullptr;
     QAction* m_legendAction = nullptr;
+    ClipboardImage* m_clipboard;
+    double m_copyFactor = 1.0;
 };
 
 } // namespace scvp::ui

@@ -7,6 +7,7 @@
 
 #include <QImage>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -14,8 +15,9 @@ using namespace scvp;
 
 namespace {
 
-// Runs scvp on the virtual display and returns the grabbed view.
-QImage grab(const QStringList& files, const QStringList& extra, QString* log)
+// Runs scvp on the virtual display and returns the grabbed view; with `copy`, also the image a
+// copy_view action put on the clipboard (its PNG).
+QImage grab(const QStringList& files, const QStringList& extra, QString* log, QImage* copy = nullptr)
 {
     QTemporaryDir dir;
     const QString png = dir.filePath(QStringLiteral("grab.png"));
@@ -28,11 +30,38 @@ QImage grab(const QStringList& files, const QStringList& extra, QString* log)
     QStringList args{QStringLiteral(SCVP_APP_PATH)};
     args += files;
     args += {QStringLiteral("--debug-size"), QStringLiteral("700x600"), QStringLiteral("--debug-grab"), png};
+    const QString copied = dir.filePath(QStringLiteral("copy.png"));
+    if (copy)
+        args += {QStringLiteral("--debug-clipboard"), copied};
     args += extra;
     p.start(QStringLiteral(SCVP_XVFB_RUN), args);
     p.waitForFinished(60000);
     *log = QString::fromLocal8Bit(p.readAll());
+    if (copy)
+        *copy = QImage(copied).convertToFormat(QImage::Format_RGB888);
     return QImage(png).convertToFormat(QImage::Format_RGB888);
+}
+
+// The bounding box of everything that is not the view's background.
+QRect contentRect(const QImage& img)
+{
+    QRect r;
+    for (int y = 0; y < img.height(); ++y)
+        for (int x = 0; x < img.width(); ++x)
+            if (img.pixel(x, y) != qRgb(30, 30, 32))
+                r |= QRect(x, y, 1, 1);
+    return r;
+}
+
+int countColor(const QImage& img, QRect r, QColor want)
+{
+    int n = 0;
+    for (int y = r.top(); y <= r.bottom(); ++y)
+        for (int x = r.left(); x <= r.right(); ++x) {
+            const QColor c = img.pixelColor(x, y);
+            n += std::abs(c.red() - want.red()) + std::abs(c.green() - want.green()) + std::abs(c.blue() - want.blue()) < 12 ? 1 : 0;
+        }
+    return n;
 }
 
 FramePtr decodeFrame(const QString& path, int32_t n)
@@ -287,6 +316,111 @@ private slots:
                 orange += std::abs(c.red() - 255) + std::abs(c.green() - 138) + std::abs(c.blue() - 61) < 12 ? 1 : 0;
             }
         QVERIFY2(orange > 150, qPrintable(QString::number(orange)));
+    }
+
+    // Ctrl+C copies the view as it is on screen: here (magnified, one video, nothing over it) the
+    // copy is the screen's framebuffer, pixel for pixel.
+    void copyViewIsTheScreen()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        const auto fx = test::fixture(QStringLiteral("h264_b"));
+        QString log;
+        QImage copy;
+        const QImage img = grab({fx->path}, {QStringLiteral("--debug-actions"), QStringLiteral("copy_view"), QStringLiteral("--debug-after"),
+                                           QStringLiteral("2500")},
+                                &log, &copy);
+        if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
+            QSKIP("Xvfb not available");
+        QVERIFY2(!img.isNull() && !copy.isNull(), qPrintable(log));
+        QVERIFY2(log.contains(QLatin1String("factor 1.000000")), qPrintable(log));
+        QCOMPARE(copy.size(), img.size());
+        QVERIFY(copy == img);
+    }
+
+    // Zoomed out below 1:1, the copy is drawn larger so that the video is 1:1 in it: the same
+    // pixels as a 1:1 view.
+    void copyViewShowsMinifiedVideoAtFullDetail()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        const auto fx = test::fixture(QStringLiteral("h264_b"));
+        QString log;
+        QImage copy;
+        const QImage small = grab({fx->path},
+                                  {QStringLiteral("--debug-actions"), QStringLiteral("zoom_out,zoom_out,zoom_out,zoom_out,copy_view"),
+                                   QStringLiteral("--debug-after"), QStringLiteral("2500")},
+                                  &log, &copy);
+        if (small.isNull() && log.contains(QLatin1String("Xvfb not found")))
+            QSKIP("Xvfb not available");
+        QVERIFY2(!copy.isNull(), qPrintable(log));
+        const QRegularExpressionMatch m = QRegularExpression(QStringLiteral("debug-copy: saved (\\d+)x(\\d+) factor ([0-9.]+)")).match(log);
+        QVERIFY2(m.hasMatch(), qPrintable(log));
+        QVERIFY2(m.captured(3).toDouble() > 1.3, qPrintable(log));  // 1:1 over 0.71x on screen
+        QCOMPARE(copy.size(), QSize(m.captured(1).toInt(), m.captured(2).toInt()));
+        QVERIFY(copy.width() > small.width());
+        QString log1;
+        const QImage oneToOne = grab({fx->path}, {QStringLiteral("--debug-actions"), QStringLiteral("zoom_1to1")}, &log1);
+        QVERIFY2(!oneToOne.isNull(), qPrintable(log1));
+        const QRect a = contentRect(copy), b = contentRect(oneToOne);
+        QCOMPARE(a.size(), QSize(320, 240));
+        QCOMPARE(b.size(), QSize(320, 240));
+        QVERIFY(copy.copy(a) == oneToOne.copy(b));
+    }
+
+    // With the mouse over the video, the copy shows what the screen shows: the cursor pixel's
+    // outline and, from the overlay, the pixel values line.
+    void copyViewIncludesTheCursorPixel()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        const auto fx = test::fixture(QStringLiteral("h264_b"));
+        QString log;
+        QImage copy;
+        // A view fitting the 320x240 video at 4x: the outline shows from 4 device px per pixel.
+        const QImage img = grab({fx->path},
+                                {QStringLiteral("--debug-size"), QStringLiteral("1400x1060"), QStringLiteral("--debug-hover"), QStringLiteral("700,500"),
+                                 QStringLiteral("--debug-actions"), QStringLiteral("copy_view"), QStringLiteral("--debug-after"), QStringLiteral("2500")},
+                                &log, &copy);
+        if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
+            QSKIP("Xvfb not available");
+        QVERIFY2(!copy.isNull(), qPrintable(log));
+        QCOMPARE(copy.size(), img.size());
+        QVERIFY2(img.height() > 900, qPrintable(log));
+        int outline = 0;  // black on a bright pixel, amber on a dark one (display.frag)
+        for (int y = 495; y <= 505; ++y)
+            for (int x = 695; x <= 705; ++x)
+                outline += copy.pixel(x, y) == qRgb(0, 0, 0) || copy.pixel(x, y) == qRgb(255, 217, 51) ? 1 : 0;
+        QVERIFY2(outline >= 8, qPrintable(QString::number(outline)));
+        // The framebuffer (no overlay) equals the copy above the values line, and not on it.
+        const int line = 40;
+        QVERIFY(copy.copy(0, 0, copy.width(), copy.height() - line) == img.copy(0, 0, img.width(), img.height() - line));
+        QVERIFY(copy.copy(0, copy.height() - 20, 200, 20) != img.copy(0, img.height() - 20, 200, 20));
+    }
+
+    // The overlay comes along, drawn at the copy's resolution: the legend chips of both videos,
+    // larger by the copy's factor.
+    void copyViewIncludesTheLegend()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        const auto a = test::fixture(QStringLiteral("h264_b"));
+        const auto b = test::fixture(QStringLiteral("hevc_opengop"));
+        QString log;
+        QImage copy;
+        const QImage img = grab({a->path, b->path},
+                                {QStringLiteral("--view"), QStringLiteral("sbs"), QStringLiteral("--legend-a"), QStringLiteral("before"),
+                                 QStringLiteral("--debug-actions"), QStringLiteral("zoom_out,zoom_out,copy_view"), QStringLiteral("--debug-grab-window"),
+                                 QStringLiteral("--debug-after"), QStringLiteral("2500")},
+                                &log, &copy);
+        if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
+            QSKIP("Xvfb not available");
+        QVERIFY2(!copy.isNull(), qPrintable(log));
+        const QColor orange(255, 138, 61), teal(41, 182, 197);
+        const QRect leftTop(0, 0, copy.width() / 2, copy.height() / 3), rightTop(copy.width() / 2, 0, copy.width() / 2, copy.height() / 3);
+        const int chipA = countColor(copy, leftTop, orange);
+        QVERIFY2(chipA > 150, qPrintable(QString::number(chipA)));
+        QVERIFY(countColor(copy, rightTop, teal) > 150);
+        QVERIFY(countColor(copy, leftTop, teal) < 20);
+        // The window shows the chip at 1x; the copy at ~1.19x: ~1.41x the pixels.
+        const int onScreen = countColor(img, img.rect(), orange);
+        QVERIFY2(chipA > onScreen * 1.2 && chipA < onScreen * 1.7, qPrintable(QStringLiteral("%1 vs %2").arg(chipA).arg(onScreen)));
     }
 
     // Flipping shows a large chip of the video now on screen in the middle of the view.

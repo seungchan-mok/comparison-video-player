@@ -43,6 +43,7 @@ const std::array<ActionInfo, size_t(Action::Count)> kInfo = {{
     {"smooth_scaling", "Smooth fractional zoom", Repeat::None},
     {"legend", "A/B legend", Repeat::None},
     {"legend_text", "Legend text...", Repeat::None},
+    {"copy_view", "Copy view as image", Repeat::None},
 }};
 
 bool isSymbolKey(int key)
@@ -108,6 +109,7 @@ KeyMap KeyMap::defaults()
     set(Action::SmoothScaling, {QKeyCombination(none, Qt::Key_N)});  // N: nearest (sharp) <-> smooth
     set(Action::Legend, {QKeyCombination(none, Qt::Key_L)});
     set(Action::LegendText, {QKeyCombination(ctrl | shift, Qt::Key_L)});
+    set(Action::CopyView, {QKeyCombination(ctrl, Qt::Key_C)});
 #if defined(Q_OS_MACOS)
     // Ctrl+Cmd+F (Qt: Meta = Ctrl key, Control = Cmd key); F11 is Show Desktop on macOS.
     set(Action::Fullscreen, {QKeyCombination(none, Qt::Key_F), QKeyCombination(Qt::MetaModifier | ctrl, Qt::Key_F)});

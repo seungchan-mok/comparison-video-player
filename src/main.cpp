@@ -8,9 +8,12 @@
 #include "ui/VideoView.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QCommandLineParser>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileOpenEvent>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QSurfaceFormat>
 #include <QTimer>
@@ -130,7 +133,8 @@ int main(int argc, char* argv[])
     QCommandLineOption debugGrabWindow(QStringLiteral("debug-grab-window"), QStringLiteral("Grab the whole window, not just the video."));
     QCommandLineOption debugActions(QStringLiteral("debug-actions"), QStringLiteral("Comma separated actions to trigger after opening (e.g. info_overlay,fullscreen)."), QStringLiteral("ids"));
     QCommandLineOption debugHover(QStringLiteral("debug-hover"), QStringLiteral("Move the mouse over the view at X,Y (logical px)."), QStringLiteral("x,y"));
-    for (const auto& o : {debugGrab, debugAfter, debugSeek, debugPlay, debugSize, debugGrabWindow, debugActions, debugHover}) {
+    QCommandLineOption debugClipboard(QStringLiteral("debug-clipboard"), QStringLiteral("Save the PNG of each view copy (copy_view) here."), QStringLiteral("png"));
+    for (const auto& o : {debugGrab, debugAfter, debugSeek, debugPlay, debugSize, debugGrabWindow, debugActions, debugHover, debugClipboard}) {
         QCommandLineOption hidden = o;
         hidden.setFlags(QCommandLineOption::HiddenFromHelp);
         parser.addOption(hidden);
@@ -209,23 +213,48 @@ int main(int argc, char* argv[])
         window.setLegendText(0, parser.value(legendA).trimmed());
     if (parser.isSet(legendB))
         window.setLegendText(1, parser.value(legendB).trimmed());
-    if (parser.isSet(debugActions)) {
-        const QStringList ids = parser.value(debugActions).split(QLatin1Char(','), Qt::SkipEmptyParts);
-        QTimer::singleShot(200, &window, [&window, ids] {
-            for (const QString& id : ids)
-                for (int a = 0; a < int(scvp::ui::Action::Count); ++a)
-                    if (id == QLatin1String(scvp::ui::KeyMap::info(scvp::ui::Action(a)).id))
-                        window.handleAction(scvp::ui::Action(a), false);
+    if (parser.isSet(debugClipboard)) {
+        const QString out = parser.value(debugClipboard);
+        QObject::connect(&window, &scvp::ui::MainWindow::viewCopied, &window, [out](QSize size, double factor) {
+            const QMimeData* data = QGuiApplication::clipboard()->mimeData();
+            const QByteArray png = data ? data->data(QStringLiteral("image/png")) : QByteArray();
+            QFile f(out);
+            const bool ok = !png.isEmpty() && f.open(QIODevice::WriteOnly) && f.write(png) == png.size();
+            std::fprintf(stderr, "debug-copy: %s %dx%d factor %.6f -> %s\n", ok ? "saved" : "FAILED", size.width(), size.height(), factor,
+                         qPrintable(out));
         });
     }
-    if (parser.isSet(debugHover)) {
+    if (parser.isSet(debugActions) || parser.isSet(debugHover)) {
+        const QStringList ids = parser.value(debugActions).split(QLatin1Char(','), Qt::SkipEmptyParts);
+        const bool hover = parser.isSet(debugHover);
         const QStringList xy = parser.value(debugHover).split(QLatin1Char(','));
         const QPointF at(xy.value(0).toDouble(), xy.value(1).toDouble());
-        QTimer::singleShot(400, &window, [&window, at] {
-            QWidget* v = window.view();
-            QMouseEvent move(QEvent::MouseMove, at, v->mapToGlobal(at), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
-            QApplication::sendEvent(v, &move);
+        // Once the opened videos show a frame (zoom steps and copies need one), at the earliest
+        // after 200 ms, at the latest after 5 s. The hover comes first and the actions a moment
+        // later, when the pixel under the cursor has been read back, as for a user.
+        auto* wait = new QTimer(&window);
+        wait->setInterval(20);
+        QElapsedTimer since;
+        since.start();
+        QObject::connect(wait, &QTimer::timeout, &window, [&window, ids, wait, since, hover, at] {
+            scvp::ui::Player* p = window.player();
+            const bool shown = (!p->slotOpen(0) || p->shown(0).frame) && (!p->slotOpen(1) || p->shown(1).frame);
+            if ((!shown && since.elapsed() < 5000) || since.elapsed() < 200)
+                return;
+            wait->stop();
+            if (hover) {
+                QWidget* v = window.view();
+                QMouseEvent move(QEvent::MouseMove, at, v->mapToGlobal(at), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+                QApplication::sendEvent(v, &move);
+            }
+            QTimer::singleShot(hover ? 300 : 0, &window, [&window, ids] {
+                for (const QString& id : ids)
+                    for (int a = 0; a < int(scvp::ui::Action::Count); ++a)
+                        if (id == QLatin1String(scvp::ui::KeyMap::info(scvp::ui::Action(a)).id))
+                            window.handleAction(scvp::ui::Action(a), false);
+            });
         });
+        wait->start();
     }
     if (parser.isSet(debugGrab)) {
         const QString out = parser.value(debugGrab);

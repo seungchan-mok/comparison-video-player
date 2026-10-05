@@ -46,6 +46,11 @@ HudOverlay::HudOverlay(Player* player, QWidget* parent)
         }
         update();
     });
+    m_messageTimer.setSingleShot(true);
+    connect(&m_messageTimer, &QTimer::timeout, this, [this] {
+        m_message.clear();
+        update();
+    });
     m_stallDelay.setSingleShot(true);
     m_stallDelay.setInterval(100);  // brief waits do not flash a badge
     connect(&m_stallDelay, &QTimer::timeout, this, [this] {
@@ -97,6 +102,13 @@ void HudOverlay::flashSlot(int slot)
 void HudOverlay::setLegendText(int slot, const QString& text)
 {
     m_legendText[size_t(slot)] = text;
+    update();
+}
+
+void HudOverlay::showMessage(const QString& text, int ms)
+{
+    m_message = text;
+    m_messageTimer.start(ms);
     update();
 }
 
@@ -429,9 +441,37 @@ QStringList HudOverlay::wrapLine(const QString& line, const QFontMetrics& fm, in
     return out;
 }
 
+// Centred above the pixel values line.
+void HudOverlay::paintMessage(QPainter& p)
+{
+    if (m_message.isEmpty())
+        return;
+    QFont f = font();
+    f.setPointSizeF(f.pointSizeF() * 1.1);
+    const QFontMetrics fm(f);
+    const QString t = fm.elidedText(m_message, Qt::ElideMiddle, std::max(60, width() - 60));
+    const int w = fm.horizontalAdvance(t) + 28;
+    const int h = fm.height() + 14;
+    const int below = m_pixelText.isEmpty() ? 0 : QFontMetrics(QFontDatabase::systemFont(QFontDatabase::FixedFont)).height() + 8;
+    const QRect box((width() - w) / 2, height() - below - h - 14, w, h);
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0, 0, 0, 190));
+    p.drawRoundedRect(box, 8, 8);
+    p.setFont(f);
+    p.setPen(QColor(245, 245, 245));
+    p.drawText(box, Qt::AlignCenter, t);
+}
+
 void HudOverlay::paintEvent(QPaintEvent*)
 {
     QPainter p(this);
+    paintContent(p, false);
+}
+
+void HudOverlay::paintCapture(QPainter& p) { paintContent(p, true); }
+
+void HudOverlay::paintContent(QPainter& p, bool capture)
+{
     p.setRenderHint(QPainter::Antialiasing);
     const QFont mono = QFontDatabase::systemFont(QFontDatabase::FixedFont);
     p.setFont(mono);
@@ -470,6 +510,8 @@ void HudOverlay::paintEvent(QPaintEvent*)
             y += fm.lineSpacing();
         }
     }
+    if (capture)
+        return;
     if (m_showStall) {
         const QString t = tr("Waiting for decoding...");
         const QRect box(width() - fm.horizontalAdvance(t) - 28, 8, fm.horizontalAdvance(t) + 20, fm.height() + 10);
@@ -478,6 +520,7 @@ void HudOverlay::paintEvent(QPaintEvent*)
         p.drawText(box, Qt::AlignCenter, t);
     }
     paintFlash(p);
+    paintMessage(p);
 }
 
 } // namespace scvp::ui

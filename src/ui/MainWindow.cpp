@@ -2,6 +2,7 @@
 
 #include "engine/RawVideoSource.h"
 
+#include "ui/ClipboardImage.h"
 #include "ui/ControlBar.h"
 #include "ui/DesktopIntegration.h"
 #include "ui/HudOverlay.h"
@@ -16,6 +17,7 @@
 #include "ui/SettingsDialog.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include <QActionGroup>
 #include <QClipboard>
@@ -28,6 +30,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QPainter>
 
 namespace scvp::ui {
 
@@ -41,6 +44,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_stage(new Stage(m_view, m_controls, this))
     , m_hud(new HudOverlay(m_player, m_view))
     , m_keys(new KeyRouter(this, m_view, KeyMap::defaults(), [this] { return m_player->controller().positionShown(); }, this))
+    , m_clipboard(new ClipboardImage(this))
 {
     setCentralWidget(m_stage);
     setAcceptDrops(true);
@@ -58,6 +62,10 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_view, &VideoView::compareChanged, m_hud, qOverload<>(&QWidget::update));
     connect(m_view, &VideoView::sampleChanged, this, [this](const render::PixelSample& s) { m_hud->setPixelText(formatPixelSample(s)); });
     connect(m_player, &Player::mediaChanged, m_hud, qOverload<>(&QWidget::update));
+    connect(m_clipboard, &ClipboardImage::copied, this, [this](QSize size) {
+        m_hud->showMessage(tr("View copied to the clipboard (%1 x %2)").arg(size.width()).arg(size.height()));
+        emit viewCopied(size, m_copyFactor);
+    });
     updateTitle();
 }
 
@@ -173,6 +181,7 @@ void MainWindow::handleAction(Action a, bool)
     }
     case Action::Legend: setLegendVisible(!m_settings.legend); break;
     case Action::LegendText: editLegendText(); break;
+    case Action::CopyView: copyView(); break;
     case Action::SmoothScaling:
         m_settings.smoothScaling = !m_settings.smoothScaling;
         m_view->setSmoothScaling(m_settings.smoothScaling);
@@ -273,6 +282,36 @@ void MainWindow::setLegendText(int slot, const QString& text)
         setLegendVisible(true);  // naming a video is asking to see the names
 }
 
+// What is on screen, sharper where the screen loses detail: the video area is drawn again at
+// a resolution that shows a minified video 1:1 (VideoView::capture), and the overlay (legend,
+// labels, info box, pixel values line) is painted over it at that resolution, not scaled up.
+void MainWindow::copyView()
+{
+    if (!m_player->slotOpen(0) && !m_player->slotOpen(1))
+        return;
+    double factor = 1.0;
+    QImage img = m_view->capture(&factor);
+    if (img.isNull()) {
+        m_hud->showMessage(tr("Could not capture the view"));
+        return;
+    }
+    const double scale = m_view->devicePixelRatioF() * factor;  // image px per logical px
+    img.setDevicePixelRatio(scale);
+    {
+        QPainter p(&img);
+        m_hud->paintCapture(p);
+    }
+    img.setDevicePixelRatio(1.0);
+    // The resolution says how large it was on screen (like a HiDPI screenshot), for programs
+    // that size pictures by it.
+    const int dpm = int(std::lround(m_view->logicalDpiX() * scale / 0.0254));
+    img.setDotsPerMeterX(dpm);
+    img.setDotsPerMeterY(dpm);
+    m_copyFactor = factor;
+    m_hud->showMessage(tr("Copying the view (%1 x %2)...").arg(img.width()).arg(img.height()), 10000);
+    m_clipboard->copy(img);
+}
+
 void MainWindow::editLegendText()
 {
     std::array<LegendDialog::Entry, 2> entries;
@@ -337,12 +376,13 @@ void MainWindow::createMenus()
     addActions({openA, openB, close, closeB, settings, quit});
 
     QMenu* edit = menuBar()->addMenu(tr("&Edit"));
-    QAction* copy = edit->addAction(tr("&Copy pixel values"), this, [this] {
+    playerAction(edit, Action::CopyView);
+    QAction* copy = edit->addAction(tr("Copy &pixel values"), this, [this] {
         const QString t = m_hud->pixelText();
         if (!t.isEmpty())
             QGuiApplication::clipboard()->setText(t);
     });
-    copy->setShortcut(QKeySequence::Copy);
+    copy->setShortcut(QKeySequence(Qt::ControlModifier | Qt::ShiftModifier | Qt::Key_C));
     addAction(copy);
 
     QMenu* play = menuBar()->addMenu(tr("&Playback"));
