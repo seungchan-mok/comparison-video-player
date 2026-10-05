@@ -30,6 +30,12 @@ public:
     // A/B legend: each part of the view names its video (coloured A/B chip + file name).
     void setLegendVisible(bool on);
     bool legendVisible() const { return m_legend; }
+    // The user's name for a video, shown instead of its file name ("" = the file name).
+    void setLegendText(int slot, const QString& text);
+    QString legendText(int slot) const { return m_legendText[size_t(slot)]; }
+    // What the legend and the flip indicator call a video: the user's text, else the file name.
+    QString slotName(int slot) const;
+    QString fileName(int slot) const;
     // A large A or B in the middle of the view for a moment (flipping between the videos).
     void flashSlot(int slot);
     static QColor slotColor(int slot);
@@ -44,7 +50,6 @@ private:
     void paintPaneLabels(QPainter& p, const QFontMetrics& fm);
     void paintLegend(QPainter& p, const QRect& avoid);
     void paintFlash(QPainter& p);
-    QString slotName(int slot) const;
     static QStringList wrapLine(const QString& line, const QFontMetrics& fm, int maxWidth);
     void sampleRates();  // refresh timer: frame rates over the last second
     QString perfLine() const;
@@ -64,6 +69,7 @@ private:
     double m_uploadMs = 0;
     double m_convertMs = 0;
     bool m_legend = false;
+    std::array<QString, 2> m_legendText;
     int m_flashSlot = -1;
     QElapsedTimer m_flashClock;
     QTimer m_flashTimer;

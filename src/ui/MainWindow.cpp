@@ -6,6 +6,7 @@
 #include "ui/DesktopIntegration.h"
 #include "ui/HudOverlay.h"
 #include "ui/KeyRouter.h"
+#include "ui/LegendDialog.h"
 #include "ui/OpenRawDialog.h"
 #include "ui/PixelInspector.h"
 #include "ui/Player.h"
@@ -77,11 +78,15 @@ bool MainWindow::openFile(int slot, const QString& path, bool askRaw)
         }
         opts.raw = p;
     }
+    const QString before = m_player->slotOpen(slot) ? QString::fromStdString(m_player->engine().info(slot).path) : QString();
     QString err;
     if (!m_player->open(slot, path, opts, &err)) {
         QMessageBox::warning(this, tr("Cannot open file"), tr("%1\n\n%2").arg(path, err));
         return false;
     }
+    // The legend text named the file that was here: another file starts from its own name.
+    if (QFileInfo(before) != QFileInfo(path))
+        m_hud->setLegendText(slot, QString());
     updateTitle();
     return true;
 }
@@ -143,6 +148,9 @@ void MainWindow::handleAction(Action a, bool)
         const render::ColorOverrides a = m_view->colorOverrides(0);
         m_view->setColorOverrides(0, m_view->colorOverrides(1));
         m_view->setColorOverrides(1, a);
+        const QString legendA = m_hud->legendText(0);  // names follow their videos
+        m_hud->setLegendText(0, m_hud->legendText(1));
+        m_hud->setLegendText(1, legendA);
         updateTitle();
         break;
     }
@@ -163,11 +171,8 @@ void MainWindow::handleAction(Action a, bool)
             m_hud->flashSlot(after.flipShowsB ? 1 : 0);
         break;
     }
-    case Action::Legend:
-        m_settings.legend = !m_settings.legend;
-        m_hud->setLegendVisible(m_settings.legend);
-        syncViewActions();
-        break;
+    case Action::Legend: setLegendVisible(!m_settings.legend); break;
+    case Action::LegendText: editLegendText(); break;
     case Action::SmoothScaling:
         m_settings.smoothScaling = !m_settings.smoothScaling;
         m_view->setSmoothScaling(m_settings.smoothScaling);
@@ -254,6 +259,35 @@ void MainWindow::offerDefaultPlayer()
 
 QString MainWindow::inspectorText() const { return m_hud->pixelText(); }
 
+void MainWindow::setLegendVisible(bool on)
+{
+    m_settings.legend = on;
+    m_hud->setLegendVisible(on);
+    syncViewActions();
+}
+
+void MainWindow::setLegendText(int slot, const QString& text)
+{
+    m_hud->setLegendText(slot, text);
+    if (!text.isEmpty())
+        setLegendVisible(true);  // naming a video is asking to see the names
+}
+
+void MainWindow::editLegendText()
+{
+    std::array<LegendDialog::Entry, 2> entries;
+    for (int slot = 0; slot < Engine::kSlots; ++slot)
+        entries[size_t(slot)] = {m_hud->legendText(slot), m_hud->fileName(slot), m_player->slotOpen(slot)};
+    if (!entries[0].open && !entries[1].open)
+        return;
+    const std::optional<LegendDialog::Texts> texts = LegendDialog::ask(this, entries);
+    if (!texts)
+        return;
+    for (int slot = 0; slot < Engine::kSlots; ++slot)
+        if (entries[size_t(slot)].open)
+            setLegendText(slot, (*texts)[size_t(slot)]);
+}
+
 void MainWindow::setCompare(const render::CompareSettings& c)
 {
     m_view->setCompare(c);
@@ -332,6 +366,7 @@ void MainWindow::createMenus()
     view->addSeparator();
     m_legendAction = playerAction(view, Action::Legend);
     m_legendAction->setCheckable(true);
+    playerAction(view, Action::LegendText);
     for (Action a : {Action::InfoOverlay, Action::Fullscreen})
         playerAction(view, a);
 

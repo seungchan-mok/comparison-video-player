@@ -94,7 +94,19 @@ void HudOverlay::flashSlot(int slot)
     update();
 }
 
+void HudOverlay::setLegendText(int slot, const QString& text)
+{
+    m_legendText[size_t(slot)] = text;
+    update();
+}
+
 QString HudOverlay::slotName(int slot) const
+{
+    const QString& own = m_legendText[size_t(slot)];
+    return own.isEmpty() ? fileName(slot) : own;
+}
+
+QString HudOverlay::fileName(int slot) const
 {
     const QFileInfo fi(QString::fromStdString(m_player->engine().info(slot).path));
     return fi.fileName().isEmpty() ? fi.filePath() : fi.fileName();
@@ -269,8 +281,9 @@ void HudOverlay::paintPaneLabels(QPainter& p, const QFontMetrics& fm)
     }
 }
 
-// Legend: a coloured A/B chip and the file name in each part of the view (for wipe: A at the
-// left edge, B at the right; for the difference: both). Kept clear of the info box.
+// Legend: a coloured A/B chip and the file name (or the user's text) in each part of the view
+// (for wipe: A at the left edge, B at the right; for the difference: both). Kept clear of the
+// info box.
 void HudOverlay::paintLegend(QPainter& p, const QRect& avoid)
 {
     auto* view = qobject_cast<const VideoView*>(parentWidget());

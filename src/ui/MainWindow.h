@@ -29,6 +29,7 @@ public:
     void setRawOverride(const RawVideoParams& p) { m_rawOverride = p; }  // command line --raw
     Player* player() const { return m_player; }
     VideoView* view() const { return m_view; }
+    HudOverlay* hud() const { return m_hud; }
 
     void handleAction(Action a, bool autoRepeat);
     void toggleFullscreen();
@@ -41,6 +42,8 @@ public:
     void reopenAll();  // after a decoding change: same files, same frame
     void setCompare(const render::CompareSettings& c);
     QString inspectorText() const;
+    // The legend shows `text` for this video instead of its file name ("" = the file name).
+    void setLegendText(int slot, const QString& text);
     void offerDefaultPlayer();
 
 protected:
@@ -54,6 +57,8 @@ private:
     QAction* playerAction(QMenu* menu, Action a);
     void createColorMenu();
     void syncViewActions();
+    void setLegendVisible(bool on);
+    void editLegendText();
 
     VideoView* m_view;
     Player* m_player;
