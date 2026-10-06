@@ -39,12 +39,20 @@ public:
     // A large A or B in the middle of the view for a moment (flipping between the videos).
     void flashSlot(int slot);
     static QColor slotColor(int slot);
+    // A short note at the bottom of the view for `ms` milliseconds ("View copied ...").
+    void showMessage(const QString& text, int ms = 2000);
+    // Paints what the overlay shows for a still of the view (legend or labels, info box, pixel
+    // values line) onto `p`, whose logical size is the overlay's; the stall badge, the flip
+    // indicator and messages are transient and left out.
+    void paintCapture(QPainter& p);
 
 protected:
     void paintEvent(QPaintEvent* e) override;
     bool eventFilter(QObject* obj, QEvent* e) override;
 
 private:
+    void paintContent(QPainter& p, bool capture);
+    void paintMessage(QPainter& p);
     QStringList lines() const;
     QString pathText(int slot) const;
     void paintPaneLabels(QPainter& p, const QFontMetrics& fm);
@@ -73,6 +81,8 @@ private:
     int m_flashSlot = -1;
     QElapsedTimer m_flashClock;
     QTimer m_flashTimer;
+    QString m_message;
+    QTimer m_messageTimer;
     bool m_info = false;
     bool m_stalled = false;
     bool m_showStall = false;

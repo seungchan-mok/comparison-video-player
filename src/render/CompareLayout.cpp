@@ -7,7 +7,7 @@
 
 namespace scvp::render {
 
-CompareLayout CompareLayout::compute(const CompareSettings& s, QSize fb, QSizeF image, bool hasA, bool hasB)
+CompareLayout CompareLayout::compute(const CompareSettings& s, QSize fb, QSizeF image, bool hasA, bool hasB, int divider)
 {
     CompareLayout l;
     const QRect full(0, 0, std::max(1, fb.width()), std::max(1, fb.height()));
@@ -27,8 +27,8 @@ CompareLayout CompareLayout::compute(const CompareSettings& s, QSize fb, QSizeF 
         break;
     }
     const int w = full.width(), h = full.height();
-    const QSize sbs(std::max(1, (w - kDivider) / 2), h);
-    const QSize tb(w, std::max(1, (h - kDivider) / 2));
+    const QSize sbs(std::max(1, (w - divider) / 2), h);
+    const QSize tb(w, std::max(1, (h - divider) / 2));
     SplitOrientation o = s.orientation;
     if (o == SplitOrientation::Auto)
         o = ViewTransform::fitScale(image, QSizeF(tb)) > ViewTransform::fitScale(image, QSizeF(sbs)) ? SplitOrientation::TopBottom

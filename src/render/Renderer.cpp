@@ -3,8 +3,11 @@
 #include "engine/FrameAllocator.h"
 #include "engine/GpuFrame.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstring>
+#include <vector>
 
 namespace scvp::render {
 
@@ -209,7 +212,12 @@ void Renderer::drawPane(int mode, const Slot& a, const Slot& b, const RenderStat
     const QColor& bg = state.background;
     gl->glUniform3f(loc("bg"), float(bg.redF()), float(bg.greenF()), float(bg.blueF()));
     gl->glUniform1i(loc("mode"), mode);
-    gl->glUniform1f(loc("wipeX"), float(std::floor(state.compare.wipe * pane.width())) + 0.5f);
+    const float wipe = float(std::floor(state.compare.wipe * pane.width()));
+    gl->glUniform1f(loc("wipeX"), wipe + 0.5f);
+    // The line covers lineWidth whole pixels around the divider pixel (one on screen).
+    const int lineWidth = std::max(1, int(std::lround(state.lineScale)));
+    const float lineLeft = wipe - float((lineWidth - 1) / 2);
+    gl->glUniform2f(loc("wipeLine"), lineLeft, lineLeft + float(lineWidth));
     gl->glUniform1f(loc("gain"), float(state.compare.diffGain));
     const QColor& line = state.divider;
     gl->glUniform3f(loc("lineColor"), float(line.redF()), float(line.greenF()), float(line.blueF()));
@@ -243,7 +251,8 @@ void Renderer::render(const RenderState& state, GLuint targetFbo)
     gl->glViewport(0, 0, fb.width(), fb.height());
     const Slot& a = m_slots[0];
     const Slot& b = m_slots[1];
-    m_layout = CompareLayout::compute(state.compare, fb, state.view.imageSize(), a.valid, b.valid);
+    const int divider = std::max(1, int(std::lround(CompareLayout::kDivider * state.lineScale)));
+    m_layout = CompareLayout::compute(state.compare, fb, state.view.imageSize(), a.valid, b.valid, divider);
     // The divider colour fills the gap between split panes.
     const QColor& clear = m_layout.panes.size() > 1 ? state.divider : state.background;
     gl->glClearColor(float(clear.redF()), float(clear.greenF()), float(clear.blueF()), 1.0f);
@@ -260,7 +269,7 @@ void Renderer::render(const RenderState& state, GLuint targetFbo)
             shaderMode = mode == CompareMode::Wipe ? 1 : mode == CompareMode::Difference ? 2 : 0;
         drawPane(shaderMode, first, b, state, pane.rect);
     }
-    if (state.probe) {
+    if (state.probe && state.sampleProbe) {
         const QSizeF view = state.view.imageSize();
         std::array<const RgbConverter*, 2> conv{};
         std::array<QPoint, 2> texel{};
@@ -285,6 +294,98 @@ void Renderer::render(const RenderState& state, GLuint targetFbo)
             m_readback.clear();
         gl->glBindFramebuffer(GL_FRAMEBUFFER, targetFbo);
     }
+}
+
+double Renderer::captureFactor(const RenderState& state, int maxSide, qint64 maxPixels)
+{
+    const QSize fb = state.framebufferSize;
+    const QSizeF image = state.view.imageSize();
+    if (fb.isEmpty() || image.isEmpty() || state.view.scale() <= 0)
+        return 1.0;
+    // Source pixels per view image pixel of each video on screen (B may be larger than A's grid).
+    const bool both = state.frames[0] && state.frames[1];
+    double texels = 0;
+    for (int i = 0; i < 2; ++i) {
+        const FramePtr& f = state.frames[size_t(i)];
+        const bool hidden = both && state.compare.mode == CompareMode::Flip && state.compare.flipShowsB != (i == 1);
+        if (f && !hidden)
+            texels = std::max({texels, f->width() / image.width(), f->height() / image.height()});
+    }
+    double factor = texels / state.view.scale();
+    factor = std::min({factor, double(maxSide) / fb.width(), double(maxSide) / fb.height(),
+                       std::sqrt(double(maxPixels) / (double(fb.width()) * fb.height()))});
+    return std::max(1.0, factor);
+}
+
+double Renderer::captureFactor(const RenderState& state, qint64 maxPixels) const
+{
+    int maxSide = kMaxCaptureSide;
+    if (m_gl) {
+        GLint tex = 0;
+        GLint viewport[2] = {0, 0};
+        m_gl->glGetIntegerv(GL_MAX_TEXTURE_SIZE, &tex);
+        m_gl->glGetIntegerv(GL_MAX_VIEWPORT_DIMS, viewport);
+        maxSide = std::min({maxSide, int(tex), int(viewport[0]), int(viewport[1])});
+    }
+    return captureFactor(state, maxSide, maxPixels);
+}
+
+QImage Renderer::capture(const RenderState& screen, double factor)
+{
+    if (!m_gl || factor <= 0)
+        return {};
+    RenderState s = screen;
+    const QSize size(std::max(1, int(std::lround(screen.framebufferSize.width() * factor))),
+                     std::max(1, int(std::lround(screen.framebufferSize.height() * factor))));
+    s.framebufferSize = size;
+    s.view = screen.view.scaled(factor);
+    // Size thresholds in logical px (digits, grid, outline, smoothing) decide as on screen.
+    s.devicePixelRatio = screen.devicePixelRatio * factor;
+    s.lineScale = screen.lineScale * factor;
+    s.sampleProbe = false;
+
+    GL* gl = m_gl;
+    while (gl->glGetError() != GL_NO_ERROR) {
+    }
+    GLuint tex = 0, fbo = 0;
+    gl->glGenTextures(1, &tex);
+    gl->glBindTexture(GL_TEXTURE_2D, tex);
+    gl->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, size.width(), size.height(), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    gl->glGenFramebuffers(1, &fbo);
+    gl->glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    gl->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+    QImage img;
+    if (gl->glGetError() == GL_NO_ERROR && gl->glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
+        const CompareLayout layout = m_layout;
+        const RenderTimings timings = m_timings;
+        render(s, fbo);
+        m_layout = layout;
+        m_timings = timings;
+        img = QImage(size, QImage::Format_RGB32);  // null when memory runs out
+        if (!img.isNull()) {
+            // 0xffRRGGBB words, as QImage stores RGB32; rows come bottom-up.
+            gl->glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+            gl->glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+            gl->glReadBuffer(GL_COLOR_ATTACHMENT0);
+            gl->glPixelStorei(GL_PACK_ALIGNMENT, 4);
+            gl->glReadPixels(0, 0, size.width(), size.height(), GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, img.bits());
+            if (gl->glGetError() == GL_NO_ERROR) {
+                std::vector<uchar> row(size_t(img.bytesPerLine()));
+                for (int y = 0, z = size.height() - 1; y < z; ++y, --z) {
+                    std::memcpy(row.data(), img.scanLine(y), row.size());
+                    std::memcpy(img.scanLine(y), img.scanLine(z), row.size());
+                    std::memcpy(img.scanLine(z), row.data(), row.size());
+                }
+            } else {
+                img = QImage();
+            }
+        }
+    }
+    gl->glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl->glDeleteFramebuffers(1, &fbo);
+    gl->glDeleteTextures(1, &tex);
+    return img;
 }
 
 } // namespace scvp::render

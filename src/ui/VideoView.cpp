@@ -80,6 +80,17 @@ void VideoView::updateGeometry()
     m_state.view.setViewportSize(QSizeF(layout().paneSize()));
 }
 
+// The pixel under the cursor, recomputed for every paint and capture (zoom, pan, new frames and
+// a mouse move not painted yet all move it).
+void VideoView::updateProbe()
+{
+    m_state.probe = m_hovering && (m_state.frames[0] || m_state.frames[1]);
+    if (m_state.probe) {
+        const QPointF d = toPane(m_hoverPos);
+        m_state.probePos = m_state.view.deviceToImage(QPointF(std::floor(d.x()), std::floor(d.y())));
+    }
+}
+
 void VideoView::setSmoothScaling(bool on)
 {
     m_state.smoothScaling = on;
@@ -125,12 +136,7 @@ void VideoView::paintGL()
     QElapsedTimer t;
     t.start();
     updateGeometry();
-    // The pixel under the cursor, recomputed every paint (zoom, pan and new frames move it).
-    m_state.probe = m_hovering && (m_state.frames[0] || m_state.frames[1]);
-    if (m_state.probe) {
-        const QPointF d = toPane(m_hoverPos);
-        m_state.probePos = m_state.view.deviceToImage(QPointF(std::floor(d.x()), std::floor(d.y())));
-    }
+    updateProbe();
     m_renderer.render(m_state, defaultFramebufferObject());
     m_lastPaintMs = t.nsecsElapsed() / 1e6;
     const render::PixelSample& s = m_renderer.sample();
@@ -151,6 +157,25 @@ void VideoView::paintGL()
     }
     if (m_renderer.samplePending())
         QTimer::singleShot(0, this, qOverload<>(&QWidget::update));  // collect it next frame
+}
+
+QImage VideoView::capture(double* factor)
+{
+    if (!m_renderer.initialized() || !isValid())
+        return {};
+    makeCurrent();
+    updateGeometry();
+    updateProbe();
+    double f = m_renderer.captureFactor(m_state);
+    QImage img = m_renderer.capture(m_state, f);
+    while (img.isNull() && f > 1.0) {  // out of GPU memory: halve it, down to the screen's size
+        f = std::max(1.0, f / 2);
+        img = m_renderer.capture(m_state, f);
+    }
+    doneCurrent();
+    if (factor)
+        *factor = f;
+    return img;
 }
 
 void VideoView::leaveEvent(QEvent* e)

@@ -29,6 +29,8 @@ private slots:
         QCOMPARE(m.match(Qt::Key_L, Qt::NoModifier), std::optional<Action>(Action::Legend));
         QCOMPARE(m.match(Qt::Key_L, Qt::ControlModifier), std::optional<Action>(Action::LoopToggle));
         QCOMPARE(m.match(Qt::Key_L, Qt::ShiftModifier), std::optional<Action>(Action::LoopClear));
+        QCOMPARE(m.match(Qt::Key_C, Qt::ControlModifier), std::optional<Action>(Action::CopyView));
+        QVERIFY(!m.match(Qt::Key_C, Qt::ControlModifier | Qt::ShiftModifier));  // copy pixel values (a menu shortcut)
         QCOMPARE(m.match(Qt::Key_Left, Qt::KeypadModifier), std::optional<Action>(Action::JumpBack));
         QCOMPARE(m.match(Qt::Key_Plus, Qt::ShiftModifier), std::optional<Action>(Action::ZoomIn));
         QVERIFY(!m.match(Qt::Key_Q, Qt::NoModifier));

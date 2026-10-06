@@ -47,6 +47,7 @@ enum class Action {
     SmoothScaling,
     Legend,
     LegendText,
+    CopyView,
     Count
 };
 

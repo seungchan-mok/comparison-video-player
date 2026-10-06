@@ -31,6 +31,12 @@ public:
     // Panes for the current mode and frames (device px).
     render::CompareLayout layout() const;
 
+    // The view as on screen (zoom, pan, comparison, pixel values, cursor outline; not the HUD),
+    // drawn again offscreen as large as needed to show the video without minifying it
+    // (Renderer::captureFactor), smaller if the GPU cannot hold that. *factor receives the
+    // image's size over the screen's device pixels. Null when nothing could be drawn.
+    QImage capture(double* factor);
+
     void fitToWindow();
     void oneToOne();
     void zoomSteps(int steps);  // keyboard zoom: around the cursor if inside, else the centre
@@ -65,6 +71,7 @@ private:
     QPointF toDevice(QPointF logical) const;
     QPointF toPane(QPointF logical) const;  // device px relative to the pane under the point
     void updateGeometry();
+    void updateProbe();
     void releaseGl();
 
     render::Renderer m_renderer;
