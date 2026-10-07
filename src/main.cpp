@@ -250,9 +250,12 @@ private:
 
 int main(int argc, char* argv[])
 {
-    // Packaging: write the launcher icons and exit (no display needed).
+    // Packaging: write the launcher icons (hicolor PNGs, or the Windows .ico) and exit (no
+    // display needed).
     if (argc == 3 && std::strcmp(argv[1], "--export-icons") == 0)
         return scvp::ui::exportAppIcons(QString::fromLocal8Bit(argv[2])) ? 0 : 1;
+    if (argc == 3 && std::strcmp(argv[1], "--export-ico") == 0)
+        return scvp::ui::exportAppIco(QString::fromLocal8Bit(argv[2])) ? 0 : 1;
     if (const Info info = requestedInfo(argc, argv); info != Info::None)
         return printInfo(argc, argv, info);
 
