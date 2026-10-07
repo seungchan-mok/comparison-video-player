@@ -110,7 +110,46 @@ jobs:
           ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=320x240:rate=25 -frames:v 25 -c:v mpeg4 -q:v 2 clip.mp4
           Expand-Archive (Get-Item build/release/scvp-*.zip).FullName -DestinationPath unpacked
           scripts/check-windows-bundle.ps1 -Dir (Get-ChildItem unpacked -Directory)[0].FullName -Clip clip.mp4
+      - name: Installer
+        # Per-user setup.exe (NSIS) with the zip's files and the icon drawn by scvp itself.
+        run: |
+          Expand-Archive (Get-Item build/release/scvp-*.zip).FullName -DestinationPath stage
+          $src = (Get-ChildItem stage -Directory)[0].FullName
+          Start-Process "$src\bin\scvp.exe" -ArgumentList '--export-ico', "$src\scvp.ico" -Wait -NoNewWindow
+          if (-not (Test-Path "$src\scvp.ico")) { throw 'scvp.exe --export-ico wrote nothing' }
+          $makensis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
+          if (-not $makensis) { $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
+          if (-not (Test-Path $makensis)) { choco install nsis -y --no-progress; $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
+          $version = (Get-Item build/release/scvp-*.zip).Name -replace '^scvp-(.*)-win64\.zip$', '$1'
+          & $makensis /V2 "/DVERSION=$version" "/DSRC=$src" "/DOUT=$PWD\build\release\scvp-$version-win64-setup.exe" packaging\windows\scvp.nsi
+          if ($LASTEXITCODE) { throw "makensis failed ($LASTEXITCODE)" }
+      - name: Check installer
+        # Silent install, the same checks on the installed copy, the registrations, then a silent
+        # uninstall that leaves nothing behind.
+        run: |
+          $setup = (Get-Item build/release/scvp-*-setup.exe).FullName
+          Start-Process $setup -ArgumentList '/S' -Wait
+          $dir = "$env:LOCALAPPDATA\Programs\SCVP"
+          scripts/check-windows-bundle.ps1 -Dir $dir -Clip clip.mp4
+          $keys = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\SCVP',
+                  'HKCU:\Software\Classes\SCVP.video\shell\open\command',
+                  'HKCU:\Software\Classes\.mp4\OpenWithProgids',
+                  'HKCU:\Software\Classes\Applications\scvp.exe\SupportedTypes',
+                  'HKCU:\Software\SCVP\Capabilities\FileAssociations'
+          foreach ($k in $keys) { if (-not (Test-Path $k)) { throw "not registered: $k" } }
+          if ((Get-ItemProperty HKCU:\Software\RegisteredApplications).SCVP -ne 'Software\SCVP\Capabilities') { throw 'not in RegisteredApplications' }
+          $lnk = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\SCVP.lnk"
+          if (-not (Test-Path $lnk)) { throw 'no Start menu entry' }
+          # The uninstaller copies itself to TEMP and returns at once: wait for the folder to go.
+          Start-Process "$dir\Uninstall.exe" -ArgumentList '/S' -Wait
+          for ($i = 0; $i -lt 60 -and (Test-Path $dir); $i++) { Start-Sleep 1 }
+          $left = @($dir, $lnk) + $keys | Where-Object { Test-Path $_ }
+          if ((Get-ItemProperty HKCU:\Software\RegisteredApplications).SCVP) { $left += 'RegisteredApplications\SCVP' }
+          if ($left) { throw "left after uninstall: $($left -join ', ')" }
+          Write-Host 'installer: install, run, registrations and uninstall OK'
       - uses: actions/upload-artifact@v4
         with:
           name: scvp-windows
-          path: build/release/scvp-*.zip
+          path: |
+            build/release/scvp-*.zip
+            build/release/scvp-*-setup.exe

@@ -78,6 +78,15 @@ dist/scvp-*-linux-x86_64/install.sh           # 현재 사용자에게 설치 (r
 - 삭제: `~/.local/opt/scvp/install.sh --uninstall` (SCVP를 가리키는 기본 프로그램 설정도 함께 지웁니다).
 - FFmpeg 라이브러리는 시스템 것을 씁니다(Ubuntu 24.04: `sudo apt install ffmpeg`).
 
+### Windows 설치
+
+릴리즈의 `scvp-<버전>-win64-setup.exe` 를 실행합니다. 관리자 권한 없이 현재 사용자에게 설치되고(`%LOCALAPPDATA%\Programs\SCVP`), 따로 설치할 것(VC++ 재배포 패키지, FFmpeg 등)이 없습니다.
+
+- 시작 메뉴에 "SCVP"가 추가되고, 영상 파일 오른쪽 클릭 → **연결 프로그램 → SCVP** 로 열 수 있습니다.
+- 기본 플레이어로 쓰려면 설치 마지막 화면의 "기본 비디오 플레이어로 선택"을 켜거나 설정 → 앱 → 기본 앱 → SCVP 에서 고릅니다(Windows는 프로그램이 스스로 기본 앱이 되는 것을 허용하지 않습니다).
+- 삭제: 설정 → 앱 → 설치된 앱 → SCVP → 제거.
+- 설치 없이 쓰려면 `scvp-<버전>-win64.zip` 을 풀고 `bin\scvp.exe` 를 실행합니다.
+
 ## 사용법
 
 ```
