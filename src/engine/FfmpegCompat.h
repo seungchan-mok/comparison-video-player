@@ -52,10 +52,13 @@ void installLogCallback(int level);
 // are expected to fail, e.g. NVENC without an NVIDIA driver). Other threads are unaffected.
 class LogSilencer {
 public:
-    LogSilencer();
+    explicit LogSilencer(bool active = true);
     ~LogSilencer();
     LogSilencer(const LogSilencer&) = delete;
     LogSilencer& operator=(const LogSilencer&) = delete;
+
+private:
+    bool m_active;
 };
 
 struct AVFrameFree {

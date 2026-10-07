@@ -27,7 +27,7 @@ struct EncoderChoice {
 
 struct EncoderSettings {
     OutputFormat format = OutputFormat::H264;
-    std::string encoder;  // "" = the first available for the format (hardware first)
+    std::string encoder;  // "" = the first available for the format that takes the size (hardware first)
     OutputQuality quality = OutputQuality::High;
     int width = 0;        // picture size given to write()
     int height = 0;

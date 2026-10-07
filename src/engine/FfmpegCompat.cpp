@@ -82,8 +82,12 @@ void logCallback(void* avcl, int level, const char* fmt, va_list vl)
 
 } // namespace
 
-LogSilencer::LogSilencer() { ++t_silenced; }
-LogSilencer::~LogSilencer() { --t_silenced; }
+LogSilencer::LogSilencer(bool active)
+    : m_active(active)
+{
+    t_silenced += m_active;
+}
+LogSilencer::~LogSilencer() { t_silenced -= m_active; }
 
 void installLogCallback(int level)
 {

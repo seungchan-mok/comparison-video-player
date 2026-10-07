@@ -355,17 +355,17 @@ bool VideoEncoder::open(const std::string& path, const EncoderSettings& settings
     if (settings.width <= 0 || settings.height <= 0 || settings.frameRate.num <= 0 || settings.frameRate.den <= 0)
         return fail(error, "invalid picture size or frame rate");
 
-    std::string name = settings.encoder;
-    if (name.empty()) {
-        const std::vector<EncoderChoice> list = available(settings.format);
-        if (list.empty())
+    // "Automatic": the first usable encoder that also takes this picture (NVENC's H.264 stops
+    // at 4096 px a side, two 4K videos side by side are 7682 px wide; x264 then takes over).
+    std::vector<std::string> names;
+    if (settings.encoder.empty()) {
+        for (const EncoderChoice& c : available(settings.format))
+            names.push_back(c.name);
+        if (names.empty())
             return fail(error, "no encoder for this format in this FFmpeg build");
-        name = list.front().name;
+    } else {
+        names.push_back(settings.encoder);
     }
-    const AVCodec* codec = avcodec_find_encoder_by_name(name.c_str());
-    if (!codec)
-        return fail(error, "encoder " + name + " is not in this FFmpeg build");
-    m_encoderName = name;
 
     const bool sequence = settings.format == OutputFormat::PngSequence;
     const char* muxer = sequence ? "image2" : settings.format == OutputFormat::Ffv1 ? "matroska" : "mp4";
@@ -386,21 +386,36 @@ bool VideoEncoder::open(const std::string& path, const EncoderSettings& settings
     if (err < 0 || !m_format)
         return fail(error, std::string("cannot create the ") + muxer + " output", err);
 
-    m_codec.reset(avcodec_alloc_context3(codec));
-    AVDictionary* opts = nullptr;
-    if (!m_codec || !configure(m_codec.get(), codec, settings, &opts)) {
+    std::string why;
+    for (const std::string& name : names) {
+        const AVCodec* codec = avcodec_find_encoder_by_name(name.c_str());
+        if (!codec) {
+            why = "encoder " + name + " is not in this FFmpeg build";
+            continue;
+        }
+        m_codec.reset(avcodec_alloc_context3(codec));
+        AVDictionary* opts = nullptr;
+        if (!m_codec || !configure(m_codec.get(), codec, settings, &opts)) {
+            av_dict_free(&opts);
+            why = "encoder " + name + " takes none of the picture formats scvp produces";
+            continue;
+        }
+        if (m_format->oformat->flags & AVFMT_GLOBALHEADER)
+            m_codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+        ff::LogSilencer quiet(names.size() > 1);  // trying the next one is not an error
+        err = avcodec_open2(m_codec.get(), codec, &opts);
         av_dict_free(&opts);
-        close();
-        return fail(error, "encoder " + name + " takes none of the picture formats scvp produces");
+        if (err >= 0) {
+            m_encoderName = name;
+            break;
+        }
+        why = "cannot open encoder " + name + " for " + std::to_string(settings.width) + "x" + std::to_string(settings.height) +
+              ": " + ff::errorString(err);
+        m_codec.reset();
     }
-    if (m_format->oformat->flags & AVFMT_GLOBALHEADER)
-        m_codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-    err = avcodec_open2(m_codec.get(), codec, &opts);
-    av_dict_free(&opts);
-    if (err < 0) {
+    if (!m_codec) {
         close();
-        return fail(error, "cannot open encoder " + name + " for " + std::to_string(settings.width) + "x" +
-                               std::to_string(settings.height), err);
+        return fail(error, why);
     }
 
     m_stream = avformat_new_stream(m_format, nullptr);
@@ -447,7 +462,7 @@ bool VideoEncoder::open(const std::string& path, const EncoderSettings& settings
         return fail(error, "out of memory", err);
     }
     SCVP_INFO("export: %s %dx%d %s via %s", url.c_str(), m_codec->width, m_codec->height,
-              av_get_pix_fmt_name(m_codec->pix_fmt), name.c_str());
+              av_get_pix_fmt_name(m_codec->pix_fmt), m_encoderName.c_str());
     return true;
 }
 

@@ -397,6 +397,29 @@ private slots:
         QCOMPARE(int(decodeAll(path).frames.size()), 1);
     }
 
+    // Automatic: past an encoder that cannot take the size (NVENC H.264: 4096 px) to the next.
+    void automaticTakesAnEncoderForTheSize()
+    {
+        if (VideoEncoder::available(OutputFormat::H264).empty())
+            QSKIP("no H.264 encoder in this FFmpeg build");
+        QTemporaryDir dir;
+        EncoderSettings s;
+        s.width = 5000;
+        s.height = 64;
+        const Written w = encode(dir.path(), s, 2);
+        QVERIFY2(w.error.isEmpty(), qPrintable(w.error));
+        QCOMPARE(w.width, 5000);
+        QCOMPARE(int(decodeAll(w.path).frames.size()), 2);
+        // Named, an encoder that cannot take it fails with its reason.
+        for (const EncoderChoice& c : VideoEncoder::available(OutputFormat::H264)) {
+            if (c.name != "h264_nvenc")
+                continue;
+            s.encoder = c.name;
+            const Written n = encode(dir.path(), s, 1);
+            QVERIFY(n.error.contains(QLatin1String("h264_nvenc")));
+        }
+    }
+
     void invalidSettingsFail()
     {
         QTemporaryDir dir;

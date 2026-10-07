@@ -19,4 +19,4 @@ scvp_add_test(tst_hwdecode tst_hwdecode.cpp
 scvp_add_test(tst_gpuframes tst_gpuframes.cpp)
 scvp_add_test(tst_videoencoder tst_videoencoder.cpp
     FUNCTIONS namesAndBuiltInEncoders roundTrip coloursAreBt709 topDownRows abortKeepsTheOldFile
-              finishReplacesTheOldFile invalidSettingsFail)
+              finishReplacesTheOldFile automaticTakesAnEncoderForTheSize invalidSettingsFail)
