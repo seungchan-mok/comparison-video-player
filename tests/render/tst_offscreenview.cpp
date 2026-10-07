@@ -1,4 +1,5 @@
 #include "engine/FrameAllocator.h"
+#include "engine/VideoEncoder.h"
 #include "render/OffscreenView.h"
 #include "support/GlTestContext.h"
 
@@ -249,6 +250,89 @@ private slots:
         QCOMPARE(v.pending(), 0);
         QVERIFY(!v.take(px, true));
         v.release();
+    }
+
+    // On the GPU, the 4:2:0 planes an encoder takes are exactly what the encoder's own CPU
+    // conversion makes of the BGRX picture (odd sizes: last column/row repeated), with the
+    // overlay in them.
+    void yuvPlanesAreTheEncoderConversion_data()
+    {
+        QTest::addColumn<int>("layout");
+        QTest::addColumn<QSize>("size");
+        QTest::newRow("nv12") << int(PlaneLayout::Nv12) << QSize(64, 48);
+        QTest::newRow("i420") << int(PlaneLayout::I420) << QSize(64, 48);
+        QTest::newRow("nv12 odd") << int(PlaneLayout::Nv12) << QSize(63, 47);
+        QTest::newRow("i420 odd") << int(PlaneLayout::I420) << QSize(63, 47);
+    }
+    void yuvPlanesAreTheEncoderConversion()
+    {
+        QFETCH(int, layout);
+        QFETCH(QSize, size);
+        CompareSettings c;
+        c.mode = CompareMode::Flip;
+        const FramePtr frame = randomRgb(m_pool, size.width(), size.height(), 9);
+        RenderState s = OffscreenView::fullFrameState(base(c), QSizeF(size), true, false);
+        s.frames = {frame, nullptr};
+        QImage layer(10, 6, QImage::Format_ARGB32_Premultiplied);
+        layer.fill(qPremultiply(qRgba(250, 20, 90, 160)));
+
+        OffscreenView rgb;
+        QVERIFY(rgb.create(m_gl.gl(), size, nullptr));
+        rgb.setLayer(0, layer, QPoint(size.width() - 6, 2));
+        const auto bgrx = draw(rgb, s);
+        QVERIFY(!bgrx.empty());
+        OffscreenView yuv;
+        QString err;
+        QVERIFY2(yuv.create(m_gl.gl(), size, &err, PlaneLayout(layout)), qPrintable(err));
+        yuv.setLayer(0, layer, QPoint(size.width() - 6, 2));
+        const QSize planes((size.width() + 1) & ~1, (size.height() + 1) & ~1);
+        QCOMPARE(yuv.planeSize(), planes);
+        QCOMPARE(yuv.pictureBytes(), size_t(planes.width() * planes.height() * 3 / 2));
+
+        const AVPixelFormat fmt = PlaneLayout(layout) == PlaneLayout::Nv12 ? AV_PIX_FMT_NV12 : AV_PIX_FMT_YUV420P;
+        AVFrame* want = av_frame_alloc();
+        want->format = fmt;
+        want->width = planes.width();
+        want->height = planes.height();
+        QVERIFY(av_frame_get_buffer(want, 0) >= 0);
+        const int stride = size.width() * 4;
+        bgrxToYuv420(&bgrx[size_t(size.height() - 1) * size_t(stride)], -stride, size.width(), size.height(), want);
+        AVFrame* got = av_frame_alloc();
+        got->format = fmt;
+        got->width = planes.width();
+        got->height = planes.height();
+        QVERIFY(av_frame_get_buffer(got, 0) >= 0);
+        QVERIFY(yuv.render(m_renderer, s));
+        QVERIFY(yuv.take(got, true));
+        auto samePlane = [&](int plane, int rowBytes, int rows) {
+            for (int y = 0; y < rows; ++y)
+                for (int x = 0; x < rowBytes; ++x) {
+                    const int a = got->data[plane][y * got->linesize[plane] + x];
+                    const int b = want->data[plane][y * want->linesize[plane] + x];
+                    if (a != b) {
+                        qWarning("plane %d at %d,%d: GPU %d, CPU %d", plane, x, y, a, b);
+                        return false;
+                    }
+                }
+            return true;
+        };
+        QVERIFY(samePlane(0, planes.width(), planes.height()));
+        if (fmt == AV_PIX_FMT_NV12) {
+            QVERIFY(samePlane(1, planes.width(), planes.height() / 2));
+        } else {
+            QVERIFY(samePlane(1, planes.width() / 2, planes.height() / 2));
+            QVERIFY(samePlane(2, planes.width() / 2, planes.height() / 2));
+        }
+        // The packed read-back: the same bytes, plane after plane.
+        std::vector<uint8_t> packed;
+        QVERIFY(yuv.render(m_renderer, s) && yuv.take(packed, true));
+        QCOMPARE(packed.size(), yuv.pictureBytes());
+        QCOMPARE(int(packed[size_t(planes.width()) * 3 + 5]), int(want->data[0][3 * want->linesize[0] + 5]));
+        QCOMPARE(int(packed[size_t(planes.width()) * planes.height() + 1]), int(want->data[1][1]));
+        av_frame_free(&want);
+        av_frame_free(&got);
+        rgb.release();
+        yuv.release();
     }
 
     void tooLargeFails()

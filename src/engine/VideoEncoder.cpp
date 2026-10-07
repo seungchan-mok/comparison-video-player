@@ -171,19 +171,11 @@ void parallelRows(int rows, int align, int64_t pixels, Fn&& fn)
         t.join();
 }
 
-// BT.709 limited range from full range R'G'B' in 16.16 fixed point (rounded to nearest).
-constexpr double kKr = 0.2126, kKb = 0.0722, kKg = 1.0 - kKr - kKb;
-constexpr int fix(double v) { return int(v * 65536.0 + (v < 0 ? -0.5 : 0.5)); }
-constexpr int kYr = fix(219.0 / 255.0 * kKr), kYg = fix(219.0 / 255.0 * kKg), kYb = fix(219.0 / 255.0 * kKb);
-constexpr double kCb = 224.0 / 255.0 / (2.0 * (1.0 - kKb));
-constexpr double kCr = 224.0 / 255.0 / (2.0 * (1.0 - kKr));
-constexpr int kUr = fix(-kCb * kKr), kUg = fix(-kCb * kKg), kUb = fix(kCb * (1.0 - kKb));
-constexpr int kVr = fix(kCr * (1.0 - kKr)), kVg = fix(-kCr * kKg), kVb = fix(-kCr * kKb);
-
 // BGRX (w x h) -> 4:2:0 (W x H, both even, >= w/h): luma per pixel, chroma from the average of
 // each 2x2 block; the column/row beyond an odd picture repeats its last one.
 void convertYuv(const uint8_t* rows, ptrdiff_t stride, int w, int h, AVFrame* dst)
 {
+    using namespace bt709;
     const bool nv12 = dst->format == AV_PIX_FMT_NV12;
     const int W = dst->width, H = dst->height;
     parallelRows(H / 2, 1, int64_t(W) * H, [&](int c0, int c1) {
@@ -204,15 +196,15 @@ void convertYuv(const uint8_t* rows, ptrdiff_t stride, int w, int h, AVFrame* ds
                     sb += b;
                     sg += g;
                     sr += r;
-                    *out = uint8_t((kYr * r + kYg * g + kYb * b + (16 << 16) + (1 << 15)) >> 16);
+                    *out = uint8_t((kY[0] * r + kY[1] * g + kY[2] * b + (16 << 16) + (1 << 15)) >> 16);
                 };
                 luma(s0 + x0, l0 + 2 * cx);
                 luma(s0 + x1, l0 + 2 * cx + 1);
                 luma(s1 + x0, l1 + 2 * cx);
                 luma(s1 + x1, l1 + 2 * cx + 1);
                 // Sums of four: two more fraction bits. Never negative with the +128 offset.
-                u[cx * step] = uint8_t((kUr * sr + kUg * sg + kUb * sb + (128 << 18) + (1 << 17)) >> 18);
-                v[cx * step] = uint8_t((kVr * sr + kVg * sg + kVb * sb + (128 << 18) + (1 << 17)) >> 18);
+                u[cx * step] = uint8_t((kU[0] * sr + kU[1] * sg + kU[2] * sb + (128 << 18) + (1 << 17)) >> 18);
+                v[cx * step] = uint8_t((kV[0] * sr + kV[1] * sg + kV[2] * sb + (128 << 18) + (1 << 17)) >> 18);
             }
         }
     });
@@ -260,6 +252,8 @@ std::filesystem::path fsPath(const std::string& utf8)
 std::string partPath(const std::string& path) { return path + ".part"; }
 
 } // namespace
+
+void bgrxToYuv420(const uint8_t* rows, ptrdiff_t stride, int w, int h, AVFrame* dst) { convertYuv(rows, stride, w, h, dst); }
 
 // ---- VideoEncoder -------------------------------------------------------------------------
 
@@ -486,6 +480,25 @@ bool VideoEncoder::write(const uint8_t* rows, int stride, std::string* error)
         convertYuv(rows, stride, m_settings.width, m_settings.height, f);
     else
         convertRgb(rows, stride, m_settings.width, m_settings.height, f);
+    f->pts = m_frames;
+    f->color_range = m_codec->color_range;
+    f->colorspace = m_codec->colorspace;
+    f->color_primaries = m_codec->color_primaries;
+    f->color_trc = m_codec->color_trc;
+    f->chroma_location = m_codec->chroma_sample_location;
+    const int err = avcodec_send_frame(m_codec.get(), f);
+    if (err < 0)
+        return fail(error, "encoding failed", err);
+    ++m_frames;
+    return drain(false, error);
+}
+
+bool VideoEncoder::writeFrame(AVFrame* f, std::string* error)
+{
+    if (!m_codec || !m_headerWritten || m_finished)
+        return fail(error, "encoder is not open");
+    if (f->format != m_codec->pix_fmt || f->width != m_codec->width || f->height != m_codec->height)
+        return fail(error, "picture does not match the encoder's input");
     f->pts = m_frames;
     f->color_range = m_codec->color_range;
     f->colorspace = m_codec->colorspace;

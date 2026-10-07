@@ -15,6 +15,10 @@
 
 namespace scvp::render {
 
+// What OffscreenView reads back: the picture as BGRX, or converted on the GPU to the 4:2:0
+// planes a video encoder takes (BT.709 limited range, exactly as VideoEncoder converts BGRX).
+enum class PlaneLayout { Bgrx, Nv12, I420 };
+
 // Pictures of the view for a video file: draws a RenderState into an offscreen framebuffer of
 // a fixed size, blends overlay layers (legend, labels, frame numbers painted by the UI) over it
 // and reads it back without stalling: glReadPixels into one of kInFlight pixel buffers plus a
@@ -25,9 +29,13 @@ class OffscreenView {
 public:
     static constexpr int kInFlight = 3;
 
-    bool create(GL* gl, QSize size, QString* error);
+    bool create(GL* gl, QSize size, QString* error, PlaneLayout layout = PlaneLayout::Bgrx);
     void release();
     QSize size() const { return m_size; }
+    PlaneLayout layout() const { return m_layout; }
+    // Size of the planes (4:2:0: rounded up to even, the last column/row repeated).
+    QSize planeSize() const { return m_planes; }
+    size_t pictureBytes() const;
 
     // Layer `index` (drawn in index order) becomes `image` (premultiplied ARGB, 1:1) with its
     // top-left at `origin` in picture px; a null image removes it. Uploaded only when the image
@@ -38,9 +46,13 @@ public:
     // picture back. False when kInFlight pictures wait to be taken, or on a GL error.
     bool render(Renderer& renderer, const RenderState& state);
     int pending() const { return m_pending; }
-    // The oldest picture read back: BGRX, bottom row first (`out` is resized to w * h * 4). With
-    // wait, blocks until the GPU finished it; else false while it is still running.
+    // The oldest picture read back (`out` is resized to pictureBytes()): BGRX, bottom row first;
+    // or the planes, top row first and packed (Y, then UV or U and V). With wait, blocks until
+    // the GPU finished it; else false while it is still running.
     bool take(std::vector<uint8_t>& out, bool wait);
+    // The same, 4:2:0 planes straight into a frame of that format and planeSize() (an encoder's
+    // input picture): no copy in between.
+    bool take(AVFrame* frame, bool wait);
 
     // The comparison of `like` (its compare, colour and smoothing settings) drawn with the videos
     // at `scale` x their size and nothing around them: split panes side by side (Auto) or top/
@@ -60,12 +72,21 @@ private:
         GLuint pbo = 0;
         GLsync fence = nullptr;
     };
+    bool convert();  // the 4:2:0 passes
+    // Maps the oldest finished read-back and hands its bytes to `use`.
+    template <class Fn>
+    bool takeMapped(bool wait, Fn&& use);
 
     GL* m_gl = nullptr;
     QSize m_size;
     GLuint m_fbo = 0;
     GLuint m_tex = 0;
     GLuint m_vao = 0;
+    PlaneLayout m_layout = PlaneLayout::Bgrx;
+    QSize m_planes;
+    GLuint m_lumaTex = 0, m_lumaFbo = 0;
+    std::array<GLuint, 2> m_chromaTex{};  // UV (NV12), or U and V (I420)
+    GLuint m_chromaFbo = 0;
     ShaderLibrary m_shaders;
     std::vector<Layer> m_layers;
     std::array<Readback, kInFlight> m_reads;

@@ -228,6 +228,76 @@ private slots:
         renderer.release();
     }
 
+    // H.264/HEVC: the GPU converts the picture to the encoder's 4:2:0 planes. The decoded video
+    // is the rendered pair (as the encoder's own conversion would give it, odd height padded),
+    // up to the encoder's loss; with SCVP_EXPORT_CPU_YUV=1 the encoder converts instead.
+    void lossyExportIsTheRenderedPair_data()
+    {
+        QTest::addColumn<bool>("gpu");
+        QTest::newRow("converted on the GPU") << true;
+        QTest::newRow("converted by the encoder") << false;
+    }
+    void lossyExportIsTheRenderedPair()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        QFETCH(bool, gpu);
+        if (VideoEncoder::available(OutputFormat::H264).empty())
+            QSKIP("no H.264 encoder in this FFmpeg build");
+        auto a = openFixture(QStringLiteral("h264_b"));
+        auto b = openFixture(QStringLiteral("hevc_opengop"));
+        QVERIFY(a && b);
+        QTemporaryDir dir;
+        const QString path = dir.path() + QStringLiteral("/lossy.mp4");
+        ExportSpec spec = makeSpec(a, b, 0, render::CompareSettings{}, path, 0.5125);  // 164 x 123 panes
+        spec.encoder.format = OutputFormat::H264;
+        spec.last = 29;
+        const QSize size = spec.view.framebufferSize;
+        QCOMPARE(size, QSize(330, 123));
+        if (!gpu)
+            qputenv("SCVP_EXPORT_CPU_YUV", "1");
+        ExportJob job(spec);
+        const Result r = run(job);
+        qunsetenv("SCVP_EXPORT_CPU_YUV");
+        QVERIFY2(r.ok, qPrintable(r.message));
+        const std::vector<FramePtr> frames = decodeAll(path);
+        QCOMPARE(int(frames.size()), 30);
+
+        render::Renderer renderer;
+        QVERIFY(renderer.initialize(m_gl.gl()));
+        render::OffscreenView view;
+        QVERIFY(view.create(m_gl.gl(), size, nullptr));
+        AVFrame* want = av_frame_alloc();
+        want->format = AV_PIX_FMT_YUV420P;
+        want->width = 330;
+        want->height = 124;
+        QVERIFY(av_frame_get_buffer(want, 0) >= 0);
+        for (int64_t pos : {0, 13, 29}) {
+            render::RenderState s = spec.view;
+            for (int slot = 0; slot < 2; ++slot)
+                s.frames[size_t(slot)] = decodeFrame(*spec.sources[size_t(slot)], spec.mapper.local(slot, pos).frame);
+            std::vector<uint8_t> px;
+            QVERIFY(view.render(renderer, s) && view.take(px, true));
+            bgrxToYuv420(&px[size_t(size.height() - 1) * size_t(size.width()) * 4], -size.width() * 4, size.width(), size.height(), want);
+            const AVFrame* got = frames[size_t(pos)]->av;
+            QCOMPARE(QSize(got->width, got->height), QSize(330, 124));
+            QCOMPARE(AVPixelFormat(got->format), AV_PIX_FMT_YUV420P);
+            for (int plane = 0; plane < 3; ++plane) {
+                const int w = plane ? 165 : 330, h = plane ? 62 : 124;
+                double se = 0;
+                for (int y = 0; y < h; ++y)
+                    for (int x = 0; x < w; ++x) {
+                        const double d = got->data[plane][y * got->linesize[plane] + x] - want->data[plane][y * want->linesize[plane] + x];
+                        se += d * d;
+                    }
+                const double psnr = 10 * std::log10(255.0 * 255.0 / std::max(1e-9, se / (w * h)));
+                QVERIFY2(psnr > 38, qPrintable(QStringLiteral("position %1 plane %2: %3 dB").arg(pos).arg(plane).arg(psnr)));
+            }
+        }
+        av_frame_free(&want);
+        view.release();
+        renderer.release();
+    }
+
     // The legend and the frame line change their corners of the picture and nothing else.
     void overlayStaysInItsCorners()
     {

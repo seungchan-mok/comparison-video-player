@@ -27,4 +27,5 @@ qt_add_resources(scvp_render "scvp_shaders"
         shaders/convert.frag
         shaders/display.frag
         shaders/overlay.frag
+        shaders/rgb2yuv.frag
 )

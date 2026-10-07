@@ -89,10 +89,19 @@ struct DecodedFrame {
     FramePtr frame;
 };
 
+// A read-back picture: BGRX rows (bottom-up) for encoders that take RGB, or the encoder's own
+// 4:2:0 input frame, converted on the GPU.
+struct Picture {
+    std::vector<uint8_t> bgrx;
+    ff::FramePtr frame;
+};
+
 // Frames decoded ahead per video: enough to keep the GPU busy, little memory (4K: ~50 MB).
 constexpr size_t kDecodedAhead = 4;
 // Pictures read back and waiting for the encoder.
 constexpr size_t kPicturesAhead = 3;
+// 4:2:0 input frames in circulation at most (queued, held by the encoder's lookahead, idle).
+constexpr int kMaxFrames = 16;
 
 QSurfaceFormat glFormat()
 {
@@ -125,7 +134,10 @@ QString timeText(double seconds)
 // the render stage sleeps on when it has to wait for decoding or encoding.
 struct ExportJob::Shared {
     std::array<std::unique_ptr<BoundedQueue<DecodedFrame>>, 2> decoded;
-    BoundedQueue<std::vector<uint8_t>> pictures{kPicturesAhead};
+    BoundedQueue<Picture> pictures{kPicturesAhead};
+    // The encoder's input format once it is open (-2: not yet, -1: it failed). The render stage
+    // waits for it: 4:2:0 encoders get their planes converted on the GPU.
+    std::atomic<int> encoderFormat{-2};
 
     void closeAll()
     {
@@ -151,6 +163,35 @@ struct ExportJob::Shared {
         if (spares.size() < kPicturesAhead + 2)
             spares.push_back(std::move(v));
     }
+    // An encoder input frame to read a picture into: one the encoder no longer holds, or a new
+    // one (null when kMaxFrames are all in use).
+    ff::FramePtr frame(AVPixelFormat format, QSize size)
+    {
+        {
+            std::lock_guard<std::mutex> lock(frameMutex);
+            for (auto it = idleFrames.begin(); it != idleFrames.end(); ++it)
+                if (av_frame_is_writable(it->get())) {
+                    ff::FramePtr f = std::move(*it);
+                    idleFrames.erase(it);
+                    return f;
+                }
+            if (framesMade >= kMaxFrames)
+                return nullptr;
+            ++framesMade;
+        }
+        ff::FramePtr f = ff::makeFrame();
+        f->format = format;
+        f->width = size.width();
+        f->height = size.height();
+        if (av_frame_get_buffer(f.get(), 0) < 0)
+            return nullptr;
+        return f;
+    }
+    void giveBack(ff::FramePtr f)
+    {
+        std::lock_guard<std::mutex> lock(frameMutex);
+        idleFrames.push_back(std::move(f));
+    }
     void notify()
     {
         {
@@ -172,6 +213,9 @@ struct ExportJob::Shared {
 
     std::mutex spareMutex;
     std::vector<std::vector<uint8_t>> spares;
+    std::mutex frameMutex;
+    std::vector<ff::FramePtr> idleFrames;
+    int framesMade = 0;
     std::mutex activityMutex;
     std::condition_variable activityCv;
     uint64_t activity = 0;
@@ -206,7 +250,7 @@ public:
             return false;
         }
         m_renderer.initialize(m_gl);
-        return m_view.create(m_gl, m_spec.view.framebufferSize, error);
+        return true;  // the picture target follows the encoder (ensureView)
     }
     void makeCurrent() { m_ctx->makeCurrent(m_surface); }
     void doneCurrent() { m_ctx->doneCurrent(); }
@@ -228,6 +272,24 @@ public:
     {
         if (m_failed)
             return Result::Failed;
+        if (!m_viewReady) {
+            const int format = m_shared.encoderFormat.load();
+            if (format < 0)
+                return Result::Idle;  // the encoder is opening (or failed: the job is cancelled)
+            m_format = AVPixelFormat(format);
+            // SCVP_EXPORT_CPU_YUV=1 leaves the conversion to the encoder's CPU code (comparison).
+            const bool gpu = qEnvironmentVariableIsEmpty("SCVP_EXPORT_CPU_YUV");
+            const render::PlaneLayout layout = !gpu                            ? render::PlaneLayout::Bgrx
+                                               : m_format == AV_PIX_FMT_NV12    ? render::PlaneLayout::Nv12
+                                               : m_format == AV_PIX_FMT_YUV420P ? render::PlaneLayout::I420
+                                                                                : render::PlaneLayout::Bgrx;
+            QString err;
+            if (!m_view.create(m_gl, m_spec.view.framebufferSize, &err, layout)) {
+                fail(err);
+                return Result::Failed;
+            }
+            m_viewReady = true;
+        }
         const auto t0 = Clock::now();
         bool progress = false;
         for (;;) {
@@ -236,12 +298,19 @@ public:
             // can be done (every read-back buffer in flight, or the range is drawn).
             const bool block = m_view.pending() == render::OffscreenView::kInFlight || m_pos > m_spec.last;
             if (m_view.pending() && m_shared.pictures.hasSpace()) {
-                std::vector<uint8_t> buf = m_shared.spare();
-                if (m_view.take(buf, block)) {
-                    m_shared.pictures.push(std::move(buf));
-                    step = true;
-                } else {
-                    m_shared.giveBack(std::move(buf));
+                Picture pic;
+                if (m_view.layout() == render::PlaneLayout::Bgrx) {
+                    pic.bgrx = m_shared.spare();
+                    if (m_view.take(pic.bgrx, block))
+                        step = m_shared.pictures.push(std::move(pic));
+                    else
+                        m_shared.giveBack(std::move(pic.bgrx));
+                } else if ((pic.frame = m_shared.frame(m_format, m_view.planeSize()))) {
+                    // Straight into the encoder's input frame: no conversion left for the CPU.
+                    if (m_view.take(pic.frame.get(), block))
+                        step = m_shared.pictures.push(std::move(pic));
+                    else
+                        m_shared.giveBack(std::move(pic.frame));
                 }
             }
             if (m_pos <= m_spec.last && m_view.pending() < render::OffscreenView::kInFlight) {
@@ -369,6 +438,8 @@ private:
     render::GL* m_gl = nullptr;
     render::Renderer m_renderer;
     render::OffscreenView m_view;
+    bool m_viewReady = false;
+    AVPixelFormat m_format = AV_PIX_FMT_NONE;  // the encoder's input
     std::array<DecodedFrame, 2> m_current;
     int64_t m_pos;
     bool m_labelsPainted = false;
@@ -662,6 +733,7 @@ void ExportJob::encodeLoop()
     VideoEncoder enc;
     std::string err;
     if (!enc.open(m_spec.path, m_spec.encoder, &err)) {
+        m_shared->encoderFormat = -1;
         fail(err);
         return;
     }
@@ -669,19 +741,27 @@ void ExportJob::encodeLoop()
         std::lock_guard<std::mutex> lock(m_mutex);
         m_stats.encoder = enc.encoderName();
     }
+    m_shared->encoderFormat = int(enc.inputFormat());
+    m_shared->notify();
     const int w = m_spec.encoder.width, h = m_spec.encoder.height;
     const int stride = w * 4;
     double busy = 0;
-    std::vector<uint8_t> buf;
-    while (m_shared->pictures.pop(buf)) {
+    Picture pic;
+    while (m_shared->pictures.pop(pic)) {
         m_shared->notify();  // room for another picture
         if (m_cancel)
             break;
         const auto t0 = Clock::now();
-        // Read back bottom row first: start at the top row and go up.
-        const bool ok = enc.write(buf.data() + size_t(h - 1) * size_t(stride), -stride, &err);
+        bool ok;
+        if (pic.frame) {
+            ok = enc.writeFrame(pic.frame.get(), &err);
+            m_shared->giveBack(std::move(pic.frame));  // reused once the encoder lets go of it
+        } else {
+            // Read back bottom row first: start at the top row and go up.
+            ok = enc.write(pic.bgrx.data() + size_t(h - 1) * size_t(stride), -stride, &err);
+            m_shared->giveBack(std::move(pic.bgrx));
+        }
         busy += secondsSince(t0);
-        m_shared->giveBack(std::move(buf));
         if (!ok) {
             fail(err);
             break;

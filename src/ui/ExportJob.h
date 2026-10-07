@@ -66,7 +66,8 @@ struct ExportStats {
 //   decode A, decode B  (one thread each: their own sessions on the open sources, hardware
 //        |                decoding as configured; frames in the order the range needs them)
 //   render              (a thread with its own GL context: Renderer + OffscreenView, overlay
-//        |                layers, asynchronous read-back)
+//        |                layers, the encoder's 4:2:0 planes converted on the GPU, asynchronous
+//        |                read-back straight into the encoder's input frames)
 //   encode              (a thread: VideoEncoder)
 //
 // connected by small bounded queues, so memory stays flat and the slowest stage sets the pace.
