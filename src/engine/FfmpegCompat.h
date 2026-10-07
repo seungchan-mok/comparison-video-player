@@ -11,12 +11,14 @@ extern "C" {
 #include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/md5.h>
+#include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
 }
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(60, 31, 100) || \
     LIBAVFORMAT_VERSION_INT < AV_VERSION_INT(60, 16, 100) || \
@@ -39,8 +41,22 @@ double streamRotation(const AVStream* st);
 // Bytes referenced by a frame's buffers (all planes).
 size_t frameBufferBytes(const AVFrame* f);
 
+// Pixel formats an encoder accepts (empty: unknown, anything may work). FFmpeg 7.1 replaced
+// AVCodec::pix_fmts with avcodec_get_supported_config().
+std::vector<AVPixelFormat> supportedPixelFormats(const AVCodec* codec);
+
 // Routes FFmpeg's log output through scvp's logger at or above `level` (AV_LOG_*).
 void installLogCallback(int level);
+
+// While one exists, FFmpeg messages logged by this thread are dropped (probing encoders that
+// are expected to fail, e.g. NVENC without an NVIDIA driver). Other threads are unaffected.
+class LogSilencer {
+public:
+    LogSilencer();
+    ~LogSilencer();
+    LogSilencer(const LogSilencer&) = delete;
+    LogSilencer& operator=(const LogSilencer&) = delete;
+};
 
 struct AVFrameFree {
     void operator()(AVFrame* f) const noexcept { av_frame_free(&f); }
