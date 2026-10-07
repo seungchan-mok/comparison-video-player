@@ -16,3 +16,8 @@ scvp_add_test(tst_exportjob tst_exportjob.cpp LIBS scvp::ui scvp_gltestsupport
     FUNCTIONS alignedDifferenceIsBlack splitIsTheRenderedPair overlayStaysInItsCorners rangeAsPngSequence
               cancelLeavesNothing drawingOnTheGuiThread encoderErrorsAreReported)
 scvp_add_test(tst_exportdialog tst_exportdialog.cpp LIBS scvp::ui)
+
+# Export throughput on the current GPU and encoders (not a ctest; run by hand):
+#   QT_QPA_PLATFORM=offscreen build/dev/tests/ui/bench_export a.mkv b.mkv --format hevc --frames 120
+add_executable(bench_export bench_export.cpp)
+target_link_libraries(bench_export PRIVATE scvp::ui Qt6::Test scvp::compile_options)

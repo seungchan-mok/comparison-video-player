@@ -15,7 +15,7 @@ build/dev/src/scvp a.mp4 b.mp4 --view diff --offset -3
 
 - API 하한은 **Qt 6.4, FFmpeg 6.1**(Ubuntu 24.04)이고, CI의 Linux 빌드가 정확히 이 버전으로 확인합니다. FFmpeg 버전 차이는 모두 `engine/FfmpegCompat.h`(FFmpeg의 유일한 include 지점, 버전 비교는 `AV_VERSION_INT`)에서 처리합니다. `FFMPEG_ROOT=<prefix>` 를 주면 pkg-config 대신 그 경로를 씁니다([cmake/ScvpFFmpeg.cmake](cmake/ScvpFFmpeg.cmake)).
 - `release` 프리셋은 테스트를 빌드하지 않습니다. 패키지: build/release 에서 `cpack`, 또는 [scripts/package-linux.sh](scripts/package-linux.sh) 로 `dist/` 에 독립 실행 번들 생성.
-- 성능 측정: `build/dev/tools/scvp-bench <video> --scenario seq|realtime|random|backstep|cached --hw cpu|gpu --json`(두 영상은 `--with <B> --scenario lockstep`), `QT_QPA_PLATFORM=offscreen build/dev/tests/render/bench_render`(ctest 아님).
+- 성능 측정: `build/dev/tools/scvp-bench <video> --scenario seq|realtime|random|backstep|cached --hw cpu|gpu --json`(두 영상은 `--with <B> --scenario lockstep`), `QT_QPA_PLATFORM=offscreen build/dev/tests/render/bench_render`, 내보내기 단계별 사용률은 `QT_QPA_PLATFORM=offscreen build/dev/tests/ui/bench_export A B --format hevc|h264|ffv1 --frames N`(둘 다 ctest 아님).
 
 ## 테스트
 
