@@ -30,7 +30,8 @@ scripts/xvfb-run.sh ctest --preset dev  # 전체를 별도 Xvfb + Mesa에서 실
 - fixture(`tests/fixtures/out/` 에 생성, `manifest.tsv` 와 ffmpeg `framemd5` 기준값 포함)를 만들려면 x264/x265/vpx/svtav1/aom이 들어간 ffmpeg CLI가 필요합니다. fixture가 필요한 테스트는 없으면 `QSKIP` 하므로(`SCVP_REQUIRE_FIXTURES()`), fixture 없이 전부 통과해도 검증된 것은 거의 없습니다.
 - [tests/CMakeLists.txt](tests/CMakeLists.txt) 의 `scvp_add_test(name src... LIBS ... FUNCTIONS f1 f2)`: `FUNCTIONS` 를 주면 QtTest 함수마다 `name.fn` 이라는 별도 ctest 항목이 됩니다(느린 fixture 테스트를 병렬로 돌리는 방법). 이런 테스트에 함수를 추가하면 목록에도 넣어야 합니다. 안 넣으면 ctest가 실행하지 않습니다.
 - 모든 테스트는 `QT_QPA_PLATFORM=offscreen` 으로 돌지만, GL 테스트는 접근 가능한 X 디스플레이(GLX)가 있어야 하고 없으면 skip합니다. Linux에서는 렌더 GL 테스트마다 `.mesa` 변형(`__GLX_VENDOR_LIBRARY_NAME=mesa LIBGL_ALWAYS_SOFTWARE=1`)이 있어 셰이더 계산을 두 드라이버에서 확인합니다. 하드웨어 디코딩·CUDA 테스트는 해당 하드웨어가 없으면 skip합니다.
-- E2E([tests/e2e/tst_app_grab.cpp](tests/e2e/tst_app_grab.cpp))는 실제 `scvp` 를 `scripts/xvfb-run.sh` 아래에서 띄우고, [src/main.cpp](src/main.cpp) 에 정의된 숨은 플래그 `--debug-grab/--debug-seek/--debug-play/--debug-actions/--debug-hover/...` 로 조작합니다. 테스트를 위해 사용자 데스크톱에 창을 띄우지 말고 이 플래그나 xvfb-run을 쓰세요.
+- E2E([tests/e2e/tst_app_grab.cpp](tests/e2e/tst_app_grab.cpp))는 실제 `scvp` 를 `scripts/xvfb-run.sh` 아래에서 띄우고, 공개 옵션(`--frame/--play/--view/--zoom/...`)과 [src/main.cpp](src/main.cpp) 에 정의된 숨은 플래그 `--debug-grab/--debug-actions/--debug-hover/...` 로 조작합니다(`--debug-grab` 은 `debug-state:` 줄로 명령줄이 정한 상태도 출력). 테스트를 위해 사용자 데스크톱에 창을 띄우지 말고 이 플래그나 xvfb-run을 쓰세요.
+- 공개 명령줄 옵션은 [src/ui/CommandLine.cpp](src/ui/CommandLine.cpp) 의 표 하나에서 파서와 `--help` 를 함께 만듭니다. 옵션을 추가할 때는 표에 넣고 `readLaunchOptions`/`applyLaunchOptions` 와 [tests/ui/tst_commandline.cpp](tests/ui/tst_commandline.cpp), README 사용법 표를 함께 고치세요.
 - 정확성 기준은 **비트 단위 일치**입니다: 디코딩한 프레임은 순차·랜덤·역방향 모두 `ffmpeg -f framemd5` 와 같아야 하고, 하드웨어 디코딩도 마찬가지입니다(`frameMd5AsSoftware` 가 NV12/P010을 다시 묶어 비교). GL 출력은 CPU 기준값과 비교합니다.
 - sanitizer: `--preset asan` / `--preset tsan`. 이 머신의 커널에서는 TSan 바이너리를 `setarch -R` 로 실행해야 합니다.
 

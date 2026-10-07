@@ -6,6 +6,7 @@
 #include <QPointF>
 
 #include <array>
+#include <optional>
 
 namespace scvp::ui {
 
@@ -40,6 +41,9 @@ public:
     void fitToWindow();
     void oneToOne();
     void zoomSteps(int steps);  // keyboard zoom: around the cursor if inside, else the centre
+    // `scale` device px per image px around the middle of the pane, with image pixel `pixel`
+    // moved there when given (command line --zoom / --center).
+    void zoomTo(double scale, std::optional<QPointF> pixel);
     double devicePixelRatioForView() const;
 
     const render::RenderTimings& lastTimings() const { return m_renderer.timings(); }

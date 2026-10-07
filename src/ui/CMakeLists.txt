@@ -1,6 +1,7 @@
 add_library(scvp_ui STATIC
     AppIcon.h AppIcon.cpp
     ClipboardImage.h ClipboardImage.cpp
+    CommandLine.h CommandLine.cpp
     ControlBar.h ControlBar.cpp
     DesktopIntegration.h DesktopIntegration.cpp
     EngineBridge.h EngineBridge.cpp

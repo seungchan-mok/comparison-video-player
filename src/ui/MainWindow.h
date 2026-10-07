@@ -3,11 +3,15 @@
 #include "ui/KeyMap.h"
 #include "ui/Settings.h"
 
+#include "render/ColorParams.h"
 #include "render/CompareLayout.h"
 
 #include <QMainWindow>
 
+#include <array>
 #include <optional>
+
+class QActionGroup;
 
 namespace scvp::ui {
 
@@ -25,9 +29,9 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
 
-    // Raw video files without their geometry in the name ask for it (askRaw forces the dialog).
-    bool openFile(int slot, const QString& path, bool askRaw = false);
-    void setRawOverride(const RawVideoParams& p) { m_rawOverride = p; }  // command line --raw
+    // Raw video files without their geometry in the name ask for it (askRaw forces the dialog);
+    // `raw` opens the file as that raw video (command line --raw).
+    bool openFile(int slot, const QString& path, bool askRaw = false, const std::optional<RawVideoParams>& raw = std::nullopt);
     Player* player() const { return m_player; }
     VideoView* view() const { return m_view; }
     HudOverlay* hud() const { return m_hud; }
@@ -42,9 +46,14 @@ public:
     void overrideGpuBudget(size_t bytes);
     void reopenAll();  // after a decoding change: same files, same frame
     void setCompare(const render::CompareSettings& c);
+    // Colour interpretation of one video; the Color menu follows.
+    void setColorOverrides(int slot, const render::ColorOverrides& o);
     QString inspectorText() const;
     // The legend shows `text` for this video instead of its file name ("" = the file name).
+    // Naming a video shows the legend for this run (the saved setting stays).
     void setLegendText(int slot, const QString& text);
+    // The legend for this run only; the L key and the legend dialog also save it.
+    void showLegend(bool on);
     // The view as it looks, as an image on the clipboard (Ctrl+C).
     void copyView();
     void offerDefaultPlayer();
@@ -64,7 +73,8 @@ private:
     QAction* playerAction(QMenu* menu, Action a);
     void createColorMenu();
     void syncViewActions();
-    void setLegendVisible(bool on);
+    void syncColorActions();
+    void setLegendVisible(bool on);  // and save it
     void editLegendText();
 
     VideoView* m_view;
@@ -74,10 +84,12 @@ private:
     HudOverlay* m_hud;
     KeyRouter* m_keys;
     AppSettings m_settings;
-    std::optional<RawVideoParams> m_rawOverride;
     QList<QPair<QAction*, Action>> m_menuActions;
     QAction* m_smoothAction = nullptr;
     QAction* m_legendAction = nullptr;
+    // Color menu per video; each action's data is the AVColorSpace / AVColorRange, -1 = auto.
+    std::array<QActionGroup*, 2> m_matrixGroup{};
+    std::array<QActionGroup*, 2> m_rangeGroup{};
     ClipboardImage* m_clipboard;
     double m_copyFactor = 1.0;
 };

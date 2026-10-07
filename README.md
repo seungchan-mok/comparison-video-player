@@ -80,21 +80,34 @@ dist/scvp-*-linux-x86_64/install.sh           # 현재 사용자에게 설치 (r
 ## 사용법
 
 ```
-scvp [A] [B] [옵션]
-  --offset N            B는 A 프레임 + N 을 표시
-  --sync frame|time     프레임 번호로 맞춤(기본) / 시간으로 맞춤(fps가 다를 때)
-  --view split|sbs|tb|wipe|flip|diff
-  --raw WxH:pix_fmt[:fps[:header]]   raw 영상으로 열기 (예: 1920x1080:nv12:30)
-  --cache-mb M          이번 실행의 메모리 캐시 크기
-  --vram-mb M           이번 실행의 VRAM 캐시 크기 (0: 사용 안 함)
-  --hwdec gpu|cpu|cuda|vaapi|d3d11va|videotoolbox
-  --legend-a 글자       범례에서 A를 파일 이름 대신 이 글자로 표시 (범례가 켜짐)
-  --legend-b 글자       B도 마찬가지
+scvp [옵션] [A] [B]
 ```
+
+명령줄 옵션으로 비교 화면을 준비한 상태로 띄울 수 있습니다(스크립트나 Claude Code 스킬에서 호출하기 좋게). 옵션은 **이번 실행에만** 적용되고 저장된 설정은 바꾸지 않습니다. 전체 설명은 `scvp --help` 가 출력합니다(구역별 옵션, 예시, 현재 키맵, 마우스; 디스플레이 없는 셸에서도 동작).
+
+| 구역 | 옵션 |
+|---|---|
+| 파일 | `--raw SPEC`(A·B 모두), `--raw-a SPEC`, `--raw-b SPEC` — raw 영상으로 열기. SPEC = `WxH:pix_fmt[:fps[:header 바이트]]` (예: `1920x1080:nv12:30`, `3840x2160:bayer_rggb16le`) |
+| 위치·재생 | `--frame N`(0부터, 표시 순서), `--play`, `--speed X`(1/16–16), `--loop FIRST:LAST` |
+| 두 영상 | `--offset N`(B는 A 프레임 + N 을 표시), `--sync frame\|time`(프레임 번호 / 시간으로 맞춤) |
+| 비교 보기 | `--view split\|sbs\|tb\|wipe\|flip\|diff`, `--wipe POS`(0–1), `--diff-gain G`(1–256). `--wipe`/`--diff-gain` 은 `--view` 가 없으면 그 모드를 고름 |
+| 보기 | `--zoom fit\|1:1\|N`(영상 1픽셀당 화면 N픽셀, 약 27 이상에서 픽셀 값 숫자 표시), `--center X,Y`(이 영상 픽셀을 가운데로, 기본 1:1), `--pixel-mode rgb\|codes`, `--legend`, `--legend-a 글자`, `--legend-b 글자`, `--info`, `--fullscreen` |
+| 색 해석 | `--matrix auto\|601\|709\|2020`, `--range auto\|limited\|full` (A·B 모두), `--matrix-a/-b`, `--range-a/-b`(한쪽만, 공통 값보다 우선) |
+| 디코딩 | `--hwdec gpu\|cpu\|cuda\|vaapi\|d3d11va\|videotoolbox`, `--cache-mb M`, `--vram-mb M`(0: 사용 안 함) |
+
+```bash
+scvp ref.mp4 enc.mp4 --view diff --diff-gain 8 --frame 120            # 차이를 8배로
+scvp src.yuv enc.mp4 --raw-a 1920x1080:yuv420p:30 --wipe 0.3           # raw 원본 대 인코딩
+scvp a.mp4 b.mp4 --view sbs --zoom 32 --center 960,540 --pixel-mode codes   # 한 픽셀 주변의 YUV 코드값
+scvp a.mkv b.mkv --legend-a "x264 crf 20" --legend-b "x265 crf 22" --play --loop 0:99
+```
+
+- 잘못된 값은 창을 띄우지 않고 이유를 stderr(`scvp: ...`)에 쓰고 종료 코드 2로 끝납니다. 열 수 없는 파일은 대화상자와 함께 stderr에도 알립니다. 정상 종료(창을 닫음)는 0.
+- `--zoom`/`--center` 는 두 영상이 첫 프레임을 보여 준 뒤 적용됩니다. N은 장치 픽셀 기준(1 키와 같음)입니다.
 
 - 파일을 창의 왼쪽(위쪽) 절반에 놓으면 A, 오른쪽(아래쪽) 절반에 놓으면 B, 두 개를 함께 놓으면 A와 B로 열립니다. 폴더를 놓으면 이미지 시퀀스로 엽니다.
 - raw 영상은 파일 이름에서 크기·형식·fps를 읽습니다: `clip_1920x1080_nv12.yuv`, `cam.3840x2160.p010le.60fps.raw`, `sensor_1920x1080_bayer_rggb16le.raw`. 알 수 없으면 입력 창이 뜨고, 파일 크기로 프레임 수를 바로 확인할 수 있습니다.
-- 범례에는 파일 이름 대신 직접 입력한 글자(방법·설정 이름 등)를 쓸 수 있습니다: **View → Legend text...**(Ctrl+Shift+L) 또는 `--legend-a`/`--legend-b`. 비워 두면 파일 이름으로 돌아갑니다. 입력한 글자는 A ↔ B 교체 때 영상을 따라가고, 그 슬롯에 다른 파일을 열면 지워지며, 저장되지 않습니다(이번 실행에만 적용).
+- 범례에는 파일 이름 대신 직접 입력한 글자(방법·설정 이름 등)를 쓸 수 있습니다: **View → Legend text...**(Ctrl+Shift+L) 또는 `--legend-a`/`--legend-b`. 비워 두면 파일 이름으로 돌아갑니다. 입력한 글자는 A ↔ B 교체 때 영상을 따라가고, 그 슬롯에 다른 파일을 열면 지워지며, 저장되지 않습니다(이번 실행에만 적용). 대화상자에서 이름을 붙이면 범례 켜짐이 저장되지만, 명령줄로 붙이면 이번 실행에만 켜집니다.
 - 이미지 시퀀스는 폴더 전체 또는 `shot_0001.png` 처럼 번호만 다른 파일들을 자연 정렬 순서로 재생합니다(기본 30 fps).
 
 ### 키맵 (설정에서 변경 가능)

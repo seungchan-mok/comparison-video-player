@@ -96,7 +96,7 @@ private slots:
         QString log;
         // Smooth scaling off (N): at the fractional fit zoom every screen pixel shows exactly one
         // source pixel.
-        const QImage img = grab({fx->path}, {QStringLiteral("--debug-seek"), QStringLiteral("100"), QStringLiteral("--debug-actions"),
+        const QImage img = grab({fx->path}, {QStringLiteral("--frame"), QStringLiteral("100"), QStringLiteral("--debug-actions"),
                                            QStringLiteral("smooth_scaling"), QStringLiteral("--debug-after"), QStringLiteral("1500")},
                                 &log);
         if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
@@ -142,7 +142,7 @@ private slots:
         SCVP_REQUIRE_FIXTURES();
         const auto fx = test::fixture(QStringLiteral("hevc_opengop"));
         QString log;
-        const QImage img = grab({fx->path}, {QStringLiteral("--debug-play"), QStringLiteral("--debug-after"), QStringLiteral("2000")}, &log);
+        const QImage img = grab({fx->path}, {QStringLiteral("--play"), QStringLiteral("--debug-after"), QStringLiteral("2000")}, &log);
         if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
             QSKIP("Xvfb not available");
         QVERIFY2(!img.isNull(), qPrintable(log));
@@ -179,7 +179,7 @@ private slots:
         QString log;
         const QImage img = grab({a->path, b->path},
                                 {QStringLiteral("--offset"), QString::number(offset), QStringLiteral("--view"), QStringLiteral("diff"),
-                                 QStringLiteral("--debug-seek"), QString::number(seek), QStringLiteral("--debug-after"), QStringLiteral("2000")},
+                                 QStringLiteral("--frame"), QString::number(seek), QStringLiteral("--debug-after"), QStringLiteral("2000")},
                                 &log);
         if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
             QSKIP("Xvfb not available");
@@ -210,7 +210,7 @@ private slots:
         QString log;
         const QImage img = grab({a->path, b->path},
                                 {QStringLiteral("--offset"), QStringLiteral("-3"), QStringLiteral("--view"), QStringLiteral("sbs"),
-                                 QStringLiteral("--debug-seek"), QStringLiteral("40"), QStringLiteral("--debug-after"), QStringLiteral("2000")},
+                                 QStringLiteral("--frame"), QStringLiteral("40"), QStringLiteral("--debug-after"), QStringLiteral("2000")},
                                 &log);
         if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
             QSKIP("Xvfb not available");
@@ -237,7 +237,7 @@ private slots:
         const auto fx = test::fixture(QStringLiteral("raw_nv12"));
         QString log;
         const QImage img = grab({fx->path},
-                                {QStringLiteral("--debug-seek"), QStringLiteral("17"), QStringLiteral("--debug-hover"), QStringLiteral("100,100"),
+                                {QStringLiteral("--frame"), QStringLiteral("17"), QStringLiteral("--debug-hover"), QStringLiteral("100,100"),
                                  QStringLiteral("--debug-after"), QStringLiteral("1500")},
                                 &log);
         if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
@@ -457,7 +457,7 @@ private slots:
         // 700x600 window: view fit is integral; hover the view centre.
         const QImage img = grab({a->path, b->path},
                                 {QStringLiteral("--offset"), QStringLiteral("-3"), QStringLiteral("--view"), QStringLiteral("wipe"),
-                                 QStringLiteral("--debug-seek"), QStringLiteral("40"), QStringLiteral("--debug-hover"), QStringLiteral("100,100"),
+                                 QStringLiteral("--frame"), QStringLiteral("40"), QStringLiteral("--debug-hover"), QStringLiteral("100,100"),
                                  QStringLiteral("--debug-after"), QStringLiteral("2000")},
                                 &log);
         if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
@@ -487,6 +487,85 @@ private slots:
             QCOMPARE(m.captured(6 + c).toUInt(), codes[size_t(c)]);
             QVERIFY(std::abs(m.captured(3 + c).toInt() - rgb[size_t(c)]) <= 1);
         }
+    }
+
+    // The public options set up the whole view, as a skill or a script would start SCVP.
+    void commandLineSetsTheView()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        const auto a = test::fixture(QStringLiteral("ffv1_10bit"));
+        const auto b = test::fixture(QStringLiteral("ffv1_10bit_trim3"));
+        QString log;
+        const QPointF hover(300, 200);
+        const QImage img = grab({a->path, b->path},
+                                {QStringLiteral("--offset"), QStringLiteral("-3"), QStringLiteral("--wipe"), QStringLiteral("0.25"),
+                                 QStringLiteral("--zoom"), QStringLiteral("32"), QStringLiteral("--center"), QStringLiteral("40,30"),
+                                 QStringLiteral("--pixel-mode"), QStringLiteral("codes"), QStringLiteral("--legend"), QStringLiteral("--info"),
+                                 QStringLiteral("--speed"), QStringLiteral("0.5"), QStringLiteral("--loop"), QStringLiteral("10:20"),
+                                 QStringLiteral("--frame"), QStringLiteral("15"), QStringLiteral("--matrix-b"), QStringLiteral("601"),
+                                 QStringLiteral("--range-a"), QStringLiteral("full"), QStringLiteral("--debug-hover"),
+                                 QStringLiteral("%1,%2").arg(hover.x()).arg(hover.y()), QStringLiteral("--debug-after"), QStringLiteral("2500")},
+                                &log);
+        if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
+            QSKIP("Xvfb not available");
+        QVERIFY2(!img.isNull(), qPrintable(log));
+        QVERIFY2(log.contains(QLatin1String("(frame 15)")), qPrintable(log));
+        QVERIFY2(log.contains(QLatin1String("debug-state: view=wipe wipe=0.25 gain=1 zoom=32 center=40,30 pixel=codes legend=on info=on "
+                                            "fullscreen=off speed=0.5 loop=10-20 offset=-3 matrix=auto,601 range=full,auto")),
+                 qPrintable(log));
+        // The pixel under the cursor is the one the zoom around pixel 40,30 puts there.
+        render::ViewTransform vt;
+        vt.setViewportSize(QSizeF(img.size()));
+        vt.setImageSize(QSizeF(320, 240));
+        const QPointF mid(img.width() / 2.0, img.height() / 2.0);
+        vt.zoomTo(32, mid);
+        vt.panBy(mid - vt.imageToDevice(QPointF(40.5, 30.5)));
+        const QPointF expect = vt.deviceToImage(hover);
+        const QRegularExpressionMatch m = QRegularExpression(QStringLiteral("debug-inspector: A \\((\\d+),(\\d+)\\)")).match(log);
+        QVERIFY2(m.hasMatch(), qPrintable(log));
+        QCOMPARE(m.captured(1).toInt(), int(expect.x()));
+        QCOMPARE(m.captured(2).toInt(), int(expect.y()));
+    }
+
+    // A bad value stops before any window, with the reason on stderr.
+    void badArgumentFailsFast()
+    {
+        QTemporaryDir dir;
+        QProcess p;
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert(QStringLiteral("XDG_CONFIG_HOME"), dir.path());
+        env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
+        p.setProcessEnvironment(env);
+        p.start(QStringLiteral(SCVP_APP_PATH), {QStringLiteral("a.mp4"), QStringLiteral("--view"), QStringLiteral("nope")});
+        QVERIFY(p.waitForFinished(20000));
+        QCOMPARE(p.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(p.exitCode(), 2);
+        const QString err = QString::fromUtf8(p.readAllStandardError());
+        QVERIFY2(err.contains(QLatin1String("scvp: --view expects split, sbs, tb, wipe, flip or diff, not 'nope'")), qPrintable(err));
+    }
+
+    // --help and --version answer without a display (a headless shell, an agent).
+    void helpWorksWithoutDisplay()
+    {
+        QTemporaryDir dir;
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        for (const char* var : {"DISPLAY", "WAYLAND_DISPLAY", "QT_QPA_PLATFORM"})
+            env.remove(QLatin1String(var));
+        env.insert(QStringLiteral("XDG_CONFIG_HOME"), dir.path());
+        auto run = [&env](const QString& arg, QString* out) {
+            QProcess p;
+            p.setProcessEnvironment(env);
+            p.start(QStringLiteral(SCVP_APP_PATH), {arg});
+            const bool done = p.waitForFinished(20000);
+            *out = QString::fromUtf8(p.readAllStandardOutput()) + QString::fromUtf8(p.readAllStandardError());
+            return done && p.exitStatus() == QProcess::NormalExit ? p.exitCode() : -1;
+        };
+        QString out;
+        QCOMPARE(run(QStringLiteral("--help"), &out), 0);
+        for (const char* text : {"Usage: scvp [options] [A] [B]", "--frame N", "Examples:", "Keys"})
+            QVERIFY2(out.contains(QLatin1String(text)), qPrintable(out));
+        QCOMPARE(run(QStringLiteral("--version"), &out), 0);
+        QVERIFY2(out.startsWith(QLatin1String("scvp ")) && out.contains(QLatin1String("FFmpeg")), qPrintable(out));
     }
 };
 

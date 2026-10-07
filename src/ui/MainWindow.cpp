@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include <QActionGroup>
 #include <QClipboard>
@@ -71,11 +72,11 @@ MainWindow::MainWindow(QWidget* parent)
 
 MainWindow::~MainWindow() = default;
 
-bool MainWindow::openFile(int slot, const QString& path, bool askRaw)
+bool MainWindow::openFile(int slot, const QString& path, bool askRaw, const std::optional<RawVideoParams>& raw)
 {
     InputOptions opts;
-    if (m_rawOverride) {
-        opts.raw = m_rawOverride;
+    if (raw) {
+        opts.raw = raw;
     } else if (askRaw || isRawVideoExtension(path.toUtf8().toStdString())) {
         RawVideoParams p = parseRawVideoName(path.toUtf8().toStdString());
         if (askRaw || !p.valid()) {
@@ -89,6 +90,8 @@ bool MainWindow::openFile(int slot, const QString& path, bool askRaw)
     const QString before = m_player->slotOpen(slot) ? QString::fromStdString(m_player->engine().info(slot).path) : QString();
     QString err;
     if (!m_player->open(slot, path, opts, &err)) {
+        // Also for whoever started SCVP from a script and cannot see the dialog.
+        std::fprintf(stderr, "scvp: cannot open %s: %s\n", qPrintable(path), qPrintable(err));
         QMessageBox::warning(this, tr("Cannot open file"), tr("%1\n\n%2").arg(path, err));
         return false;
     }
@@ -156,6 +159,7 @@ void MainWindow::handleAction(Action a, bool)
         const render::ColorOverrides a = m_view->colorOverrides(0);
         m_view->setColorOverrides(0, m_view->colorOverrides(1));
         m_view->setColorOverrides(1, a);
+        syncColorActions();
         const QString legendA = m_hud->legendText(0);  // names follow their videos
         m_hud->setLegendText(0, m_hud->legendText(1));
         m_hud->setLegendText(1, legendA);
@@ -179,7 +183,7 @@ void MainWindow::handleAction(Action a, bool)
             m_hud->flashSlot(after.flipShowsB ? 1 : 0);
         break;
     }
-    case Action::Legend: setLegendVisible(!m_settings.legend); break;
+    case Action::Legend: setLegendVisible(!m_hud->legendVisible()); break;
     case Action::LegendText: editLegendText(); break;
     case Action::CopyView: copyView(); break;
     case Action::SmoothScaling:
@@ -271,6 +275,11 @@ QString MainWindow::inspectorText() const { return m_hud->pixelText(); }
 void MainWindow::setLegendVisible(bool on)
 {
     m_settings.legend = on;
+    showLegend(on);
+}
+
+void MainWindow::showLegend(bool on)
+{
     m_hud->setLegendVisible(on);
     syncViewActions();
 }
@@ -279,7 +288,7 @@ void MainWindow::setLegendText(int slot, const QString& text)
 {
     m_hud->setLegendText(slot, text);
     if (!text.isEmpty())
-        setLegendVisible(true);  // naming a video is asking to see the names
+        showLegend(true);  // naming a video is asking to see the names
 }
 
 // What is on screen, sharper where the screen loses detail: the video area is drawn again at
@@ -322,15 +331,26 @@ void MainWindow::editLegendText()
     const std::optional<LegendDialog::Texts> texts = LegendDialog::ask(this, entries);
     if (!texts)
         return;
+    bool named = false;
     for (int slot = 0; slot < Engine::kSlots; ++slot)
-        if (entries[size_t(slot)].open)
+        if (entries[size_t(slot)].open) {
             setLegendText(slot, (*texts)[size_t(slot)]);
+            named |= !(*texts)[size_t(slot)].isEmpty();
+        }
+    if (named)
+        setLegendVisible(true);  // named here: keep the legend on in later runs, as the L key does
 }
 
 void MainWindow::setCompare(const render::CompareSettings& c)
 {
     m_view->setCompare(c);
     m_hud->update();
+}
+
+void MainWindow::setColorOverrides(int slot, const render::ColorOverrides& o)
+{
+    m_view->setColorOverrides(slot, o);
+    syncColorActions();
 }
 
 QAction* MainWindow::playerAction(QMenu* menu, Action a)
@@ -429,35 +449,38 @@ void MainWindow::createColorMenu()
         const QString v = slot == 0 ? QStringLiteral("A") : QStringLiteral("B");
         QMenu* matrix = color->addMenu(tr("%1: YUV matrix").arg(v));
         auto* mg = new QActionGroup(matrix);
+        m_matrixGroup[size_t(slot)] = mg;
         const std::pair<const char*, std::optional<AVColorSpace>> matrices[] = {
             {"Auto (metadata)", std::nullopt}, {"BT.601", AVCOL_SPC_BT470BG}, {"BT.709", AVCOL_SPC_BT709}, {"BT.2020", AVCOL_SPC_BT2020_NCL}};
         for (const auto& [name, cs] : matrices) {
             QAction* a = matrix->addAction(tr(name));
             a->setCheckable(true);
-            a->setChecked(!cs);
+            a->setData(cs ? int(*cs) : -1);
             mg->addAction(a);
             connect(a, &QAction::triggered, this, [this, slot, cs = cs] {
                 render::ColorOverrides o = m_view->colorOverrides(slot);
                 o.matrix = cs;
-                m_view->setColorOverrides(slot, o);
+                setColorOverrides(slot, o);
             });
         }
         QMenu* range = color->addMenu(tr("%1: range").arg(v));
         auto* rg = new QActionGroup(range);
+        m_rangeGroup[size_t(slot)] = rg;
         const std::pair<const char*, std::optional<AVColorRange>> ranges[] = {
             {"Auto (metadata)", std::nullopt}, {"Limited (16-235)", AVCOL_RANGE_MPEG}, {"Full (0-255)", AVCOL_RANGE_JPEG}};
         for (const auto& [name, r] : ranges) {
             QAction* a = range->addAction(tr(name));
             a->setCheckable(true);
-            a->setChecked(!r);
+            a->setData(r ? int(*r) : -1);
             rg->addAction(a);
             connect(a, &QAction::triggered, this, [this, slot, r = r] {
                 render::ColorOverrides o = m_view->colorOverrides(slot);
                 o.range = r;
-                m_view->setColorOverrides(slot, o);
+                setColorOverrides(slot, o);
             });
         }
     }
+    syncColorActions();
     color->addSeparator();
     QAction* bilinear = color->addAction(tr("Interpolate chroma (bilinear)"));
     bilinear->setCheckable(true);
@@ -476,12 +499,28 @@ void MainWindow::syncViewActions()
     if (m_smoothAction)
         m_smoothAction->setChecked(m_settings.smoothScaling);
     if (m_legendAction)
-        m_legendAction->setChecked(m_settings.legend);
+        m_legendAction->setChecked(m_hud->legendVisible());  // the command line may show it for this run only
+}
+
+// The checks follow the view (swapping A and B, the command line), not only the menu's own clicks.
+void MainWindow::syncColorActions()
+{
+    for (int slot = 0; slot < 2; ++slot) {
+        const render::ColorOverrides& o = m_view->colorOverrides(slot);
+        if (QActionGroup* g = m_matrixGroup[size_t(slot)])
+            for (QAction* a : g->actions())
+                a->setChecked(a->data().toInt() == (o.matrix ? int(*o.matrix) : -1));
+        if (QActionGroup* g = m_rangeGroup[size_t(slot)])
+            for (QAction* a : g->actions())
+                a->setChecked(a->data().toInt() == (o.range ? int(*o.range) : -1));
+    }
 }
 
 void MainWindow::applySettings(const AppSettings& s)
 {
     const bool hwChanged = s.hwdec != m_settings.hwdec;
+    // Only a changed setting replaces a legend shown for this run (command line).
+    const bool legendChanged = s.legend != m_settings.legend;
     m_settings = s;
     m_player->engine().setHardware(s.hwConfig());
     if (s.hwConfig().policy != HwPolicy::Off)
@@ -490,7 +529,8 @@ void MainWindow::applySettings(const AppSettings& s)
     if (s.vramMb)
         m_player->engine().setGpuMemoryBudget(s.vramBytes());
     m_view->setSmoothScaling(s.smoothScaling);
-    m_hud->setLegendVisible(s.legend);
+    if (legendChanged)
+        m_hud->setLegendVisible(s.legend);
     syncViewActions();
     m_player->setJumpSettings(s.jumps);
     m_controls->setJumpSettings(s.jumps);
