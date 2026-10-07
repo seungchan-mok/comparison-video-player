@@ -2,6 +2,7 @@
 #include "render/ViewTransform.h"
 #include "ui/AppIcon.h"
 #include "ui/CommandLine.h"
+#include "ui/ExportDialog.h"
 #include "ui/HudOverlay.h"
 #include "ui/KeyMap.h"
 #include "ui/MainWindow.h"
@@ -15,6 +16,7 @@
 #include <QCommandLineParser>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QFileOpenEvent>
 #include <QMessageBox>
 #include <QMimeData>
@@ -82,6 +84,14 @@ void addDebugOptions(QCommandLineParser& parser)
                            QStringLiteral("x,y")),
         QCommandLineOption(QStringLiteral("debug-clipboard"), QStringLiteral("Save the PNG of each view copy (copy_view) here."),
                            QStringLiteral("png")),
+        QCommandLineOption(QStringLiteral("debug-export"),
+                           QStringLiteral("Export the comparison to this file (.mp4 H.264, .mkv FFV1, .png sequence) once the "
+                                          "videos are shown and indexed, then quit."),
+                           QStringLiteral("path")),
+        QCommandLineOption(QStringLiteral("debug-export-opts"),
+                           QStringLiteral("Comma separated: hevc, screen, size=PERCENT, range=FIRST-LAST, encoder=NAME, "
+                                          "quality=high|medium|small, labels=0|1, info=0|1."),
+                           QStringLiteral("list")),
     };
     for (QCommandLineOption o : options) {
         o.setFlags(QCommandLineOption::HiddenFromHelp);
@@ -119,6 +129,38 @@ int printInfo(int argc, char* argv[], Info info)
         report(QStringLiteral("scvp %1\nQt %2\n%3\n").arg(QStringLiteral(SCVP_VERSION), QLatin1String(qVersion()), ffmpegVersionString()),
                false);
     return 0;
+}
+
+// --debug-export: what to export, from the file's extension and the option list.
+scvp::ui::ExportOptions debugExportOptions(const QString& path, const QString& list)
+{
+    using namespace scvp;
+    ui::ExportOptions o;
+    o.path = path;
+    const QString ext = QFileInfo(path).suffix().toLower();
+    o.format = ext == QLatin1String("mkv") ? OutputFormat::Ffv1 : ext == QLatin1String("png") ? OutputFormat::PngSequence : OutputFormat::H264;
+    for (const QString& item : list.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+        const QString key = item.section(QLatin1Char('='), 0, 0).trimmed();
+        const QString value = item.section(QLatin1Char('='), 1).trimmed();
+        if (key == QLatin1String("hevc"))
+            o.format = OutputFormat::Hevc;
+        else if (key == QLatin1String("screen"))
+            o.picture = ui::ExportPicture::Screen;
+        else if (key == QLatin1String("size"))
+            o.scale = value.toInt();
+        else if (key == QLatin1String("range")) {
+            o.first = value.section(QLatin1Char('-'), 0, 0).toLongLong();
+            o.last = value.section(QLatin1Char('-'), 1, 1).toLongLong();
+        } else if (key == QLatin1String("encoder"))
+            o.encoder = value;
+        else if (key == QLatin1String("quality"))
+            o.quality = value == QLatin1String("small") ? OutputQuality::Small : value == QLatin1String("medium") ? OutputQuality::Medium : OutputQuality::High;
+        else if (key == QLatin1String("labels"))
+            o.labels = value != QLatin1String("0");
+        else if (key == QLatin1String("info"))
+            o.frameInfo = value != QLatin1String("0");
+    }
+    return o;
 }
 
 // The view state the command line can set, for the end-to-end checks.
@@ -287,6 +329,41 @@ int main(int argc, char* argv[])
         };
     }
     scvp::ui::applyLaunchOptions(window, launch, viewReady);
+
+    if (parser.isSet(QStringLiteral("debug-export"))) {
+        const scvp::ui::ExportOptions o =
+            debugExportOptions(parser.value(QStringLiteral("debug-export")), parser.value(QStringLiteral("debug-export-opts")));
+        // Once every open video shows a frame (the view has its geometry) and is indexed.
+        auto* wait = new QTimer(&window);
+        wait->setInterval(50);
+        QObject::connect(wait, &QTimer::timeout, &window, [&window, wait, o] {
+            scvp::ui::Player* p = window.player();
+            bool ready = p->slotOpen(0) || p->slotOpen(1);
+            for (int slot = 0; slot < 2; ++slot)
+                if (p->slotOpen(slot) && (!p->shown(slot).frame || !p->engine().stats(slot).indexComplete))
+                    ready = false;
+            if (!ready)
+                return;
+            wait->stop();
+            QString err;
+            if (!window.startExport(o, &err)) {
+                std::fprintf(stderr, "debug-export: FAILED to start: %s\n", qPrintable(err));
+                QApplication::exit(1);
+            }
+        });
+        QObject::connect(&window, &scvp::ui::MainWindow::exportFinished, &window, [&window, o](bool ok, const QString& message) {
+            const scvp::ui::ExportStats& s = window.lastExportStats();
+            auto pct = [&s](double busy) { return s.seconds > 0 ? 100.0 * busy / s.seconds : 0.0; };
+            std::fprintf(stderr,
+                         "debug-export: %s %lld frames %dx%d via %s in %.2f s (%.1f fps; busy: decode A %.0f%% B %.0f%%, render %.0f%%, "
+                         "encode %.0f%%; %d missing) -> %s%s%s\n",
+                         ok ? "done" : "FAILED", static_cast<long long>(s.frames), s.width, s.height, s.encoder.c_str(), s.seconds,
+                         s.seconds > 0 ? s.frames / s.seconds : 0.0, pct(s.decode[0]), pct(s.decode[1]), pct(s.render), pct(s.encode),
+                         s.missing, qPrintable(o.path), message.isEmpty() ? "" : ": ", qPrintable(message));
+            QApplication::exit(ok ? 0 : 1);
+        });
+        wait->start();
+    }
 
     if (parser.isSet(QStringLiteral("debug-grab"))) {
         const QString out = parser.value(QStringLiteral("debug-grab"));

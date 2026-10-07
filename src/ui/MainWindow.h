@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ui/ExportDialog.h"
+#include "ui/ExportJob.h"
 #include "ui/KeyMap.h"
 #include "ui/Settings.h"
 
@@ -9,6 +11,7 @@
 #include <QMainWindow>
 
 #include <array>
+#include <memory>
 #include <optional>
 
 class QActionGroup;
@@ -17,6 +20,7 @@ namespace scvp::ui {
 
 class ClipboardImage;
 class ControlBar;
+class ExportProgress;
 class HudOverlay;
 class KeyRouter;
 class Stage;
@@ -57,10 +61,21 @@ public:
     // The view as it looks, as an image on the clipboard (Ctrl+C).
     void copyView();
     void offerDefaultPlayer();
+    // File > Export Comparison Video: asks what to export and starts it in the background (or
+    // shows the export that is running).
+    void exportVideo();
+    // Starts an export with these options (also --debug-export); false with the reason when it
+    // cannot start (no video, still indexing, one already running).
+    bool startExport(const ExportOptions& o, QString* error = nullptr);
+    bool exporting() const { return m_export != nullptr; }
+    // The export these options describe for the videos and the view as they are now.
+    std::optional<ExportSpec> exportSpec(const ExportOptions& o, QString* error);
+    const ExportStats& lastExportStats() const { return m_lastExport; }
 
 signals:
     // The copy is on the clipboard; factor: its size over the screen's device pixels.
     void viewCopied(QSize size, double factor);
+    void exportFinished(bool ok, const QString& message);
 
 protected:
     void dragEnterEvent(QDragEnterEvent* e) override;
@@ -76,6 +91,7 @@ private:
     void syncColorActions();
     void setLegendVisible(bool on);  // and save it
     void editLegendText();
+    void exportDone(bool ok, const QString& message);
 
     VideoView* m_view;
     Player* m_player;
@@ -92,6 +108,10 @@ private:
     std::array<QActionGroup*, 2> m_rangeGroup{};
     ClipboardImage* m_clipboard;
     double m_copyFactor = 1.0;
+    std::unique_ptr<ExportJob> m_export;  // running
+    ExportProgress* m_exportProgress;
+    QAction* m_exportAction = nullptr;
+    ExportStats m_lastExport;
 };
 
 } // namespace scvp::ui

@@ -5,7 +5,9 @@ add_library(scvp_ui STATIC
     ControlBar.h ControlBar.cpp
     DesktopIntegration.h DesktopIntegration.cpp
     EngineBridge.h EngineBridge.cpp
+    ExportDialog.h ExportDialog.cpp
     ExportJob.h ExportJob.cpp
+    ExportProgress.h ExportProgress.cpp
     FramePacer.h FramePacer.cpp
     HudOverlay.h HudOverlay.cpp
     KeyMap.h KeyMap.cpp

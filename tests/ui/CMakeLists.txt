@@ -15,3 +15,4 @@ scvp_add_test(tst_overlaypainter tst_overlaypainter.cpp LIBS scvp::ui)
 scvp_add_test(tst_exportjob tst_exportjob.cpp LIBS scvp::ui scvp_gltestsupport
     FUNCTIONS alignedDifferenceIsBlack splitIsTheRenderedPair overlayStaysInItsCorners rangeAsPngSequence
               cancelLeavesNothing drawingOnTheGuiThread encoderErrorsAreReported)
+scvp_add_test(tst_exportdialog tst_exportdialog.cpp LIBS scvp::ui)

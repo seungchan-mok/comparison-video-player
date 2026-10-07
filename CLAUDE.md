@@ -30,7 +30,7 @@ scripts/xvfb-run.sh ctest --preset dev  # 전체를 별도 Xvfb + Mesa에서 실
 - fixture(`tests/fixtures/out/` 에 생성, `manifest.tsv` 와 ffmpeg `framemd5` 기준값 포함)를 만들려면 x264/x265/vpx/svtav1/aom이 들어간 ffmpeg CLI가 필요합니다. fixture가 필요한 테스트는 없으면 `QSKIP` 하므로(`SCVP_REQUIRE_FIXTURES()`), fixture 없이 전부 통과해도 검증된 것은 거의 없습니다.
 - [tests/CMakeLists.txt](tests/CMakeLists.txt) 의 `scvp_add_test(name src... LIBS ... FUNCTIONS f1 f2)`: `FUNCTIONS` 를 주면 QtTest 함수마다 `name.fn` 이라는 별도 ctest 항목이 됩니다(느린 fixture 테스트를 병렬로 돌리는 방법). 이런 테스트에 함수를 추가하면 목록에도 넣어야 합니다. 안 넣으면 ctest가 실행하지 않습니다.
 - 모든 테스트는 `QT_QPA_PLATFORM=offscreen` 으로 돌지만, GL 테스트는 접근 가능한 X 디스플레이(GLX)가 있어야 하고 없으면 skip합니다. Linux에서는 렌더 GL 테스트마다 `.mesa` 변형(`__GLX_VENDOR_LIBRARY_NAME=mesa LIBGL_ALWAYS_SOFTWARE=1`)이 있어 셰이더 계산을 두 드라이버에서 확인합니다. 하드웨어 디코딩·CUDA 테스트는 해당 하드웨어가 없으면 skip합니다.
-- E2E([tests/e2e/tst_app_grab.cpp](tests/e2e/tst_app_grab.cpp))는 실제 `scvp` 를 `scripts/xvfb-run.sh` 아래에서 띄우고, 공개 옵션(`--frame/--play/--view/--zoom/...`)과 [src/main.cpp](src/main.cpp) 에 정의된 숨은 플래그 `--debug-grab/--debug-actions/--debug-hover/...` 로 조작합니다(`--debug-grab` 은 `debug-state:` 줄로 명령줄이 정한 상태도 출력). 테스트를 위해 사용자 데스크톱에 창을 띄우지 말고 이 플래그나 xvfb-run을 쓰세요.
+- E2E([tests/e2e/tst_app_grab.cpp](tests/e2e/tst_app_grab.cpp))는 실제 `scvp` 를 `scripts/xvfb-run.sh` 아래에서 띄우고, 공개 옵션(`--frame/--play/--view/--zoom/...`)과 [src/main.cpp](src/main.cpp) 에 정의된 숨은 플래그 `--debug-grab/--debug-actions/--debug-hover/--debug-export/...` 로 조작합니다(`--debug-grab` 은 `debug-state:` 줄로 명령줄이 정한 상태도 출력). 테스트를 위해 사용자 데스크톱에 창을 띄우지 말고 이 플래그나 xvfb-run을 쓰세요.
 - 공개 명령줄 옵션은 [src/ui/CommandLine.cpp](src/ui/CommandLine.cpp) 의 표 하나에서 파서와 `--help` 를 함께 만듭니다. 옵션을 추가할 때는 표에 넣고 `readLaunchOptions`/`applyLaunchOptions` 와 [tests/ui/tst_commandline.cpp](tests/ui/tst_commandline.cpp), README 사용법 표를 함께 고치세요.
 - 정확성 기준은 **비트 단위 일치**입니다: 디코딩한 프레임은 순차·랜덤·역방향 모두 `ffmpeg -f framemd5` 와 같아야 하고, 하드웨어 디코딩도 마찬가지입니다(`frameMd5AsSoftware` 가 NV12/P010을 다시 묶어 비교). GL 출력은 CPU 기준값과 비교합니다.
 - sanitizer: `--preset asan` / `--preset tsan`. 이 머신의 커널에서는 TSan 바이너리를 `setarch -R` 로 실행해야 합니다.
@@ -72,6 +72,7 @@ PlaybackController (UI 스레드, 타임라인 위치)
 - `CudaApi` 는 CUDA 드라이버 API를 실행 중에 로드합니다(`libcuda.so.1`/`nvcuda.dll`). 그래서 CUDA 툴킷이 필요 없고, NVIDIA가 아닌 머신에서는 없다고만 보고합니다.
 - `HwDevice` 는 하드웨어 장치 컨텍스트를 프로세스 전체에서 공유합니다. GPU 우선 디코딩은 규격상 비트 정확한 코덱에만 쓰고, 그 외에는 소프트웨어로 디코딩합니다. 장치가 실제로 규격대로 디코딩하는지는 (장치, 코덱, 픽셀 형식)마다 처음 한 번 키 프레임을 소프트웨어 결과와 비교해 확인하고(`FFmpegDecodeSession::verifyHardware`, 결과는 `HwDevices::verdict`), 다르면 그 조합은 프로세스가 끝날 때까지 소프트웨어로 디코딩합니다. 확인 전의 하드웨어 프레임은 표시하지 않습니다(예: GitHub macOS VM의 VideoToolbox는 8비트 HEVC 색차가 다름).
 - CUDA에서는 프레임이 VRAM에 머물 수 있고(`FrameLocation::Cuda`, RAM으로 스필되는 VRAM 캐시 계층), 렌더는 이를 `CudaInteropSource` 로 zero-copy 매핑합니다. 나머지는 모두 `CpuUploadSource`(텍스처 더블 버퍼)를 거칩니다.
+- 내보내기(`ui::ExportJob`): 재생 파이프라인과 별개입니다. `Engine::source()` 로 슬롯의 소스를 공유받아(색인 재스캔 없음) 영상마다 디코드 스레드를 두고, 자체 GL 컨텍스트 스레드가 `Renderer` + `render::OffscreenView`(오버레이 레이어, PBO 비동기 리드백)로 그린 뒤, 인코드 스레드가 `engine::VideoEncoder`(BT.709 4:2:0은 자체 고정소수점 변환, 무손실은 RGB 그대로)로 씁니다. 단계 사이는 작은 bounded queue로 잇습니다.
 - 렌더: `TextureSource` -> `RgbConverter`(`convert.frag`: 픽셀 값 오버레이용 원본 코드값도 보존, GPU Bayer 디모자이크) -> 표시 패스(`display.frag`: 비교 모드, 숫자, 커서 픽셀 테두리) -> 비동기 `PixelReadback`. 셰이더가 읽지 못하는 형식은 swscale로 먼저 변환합니다.
 
 ## 작업 규칙

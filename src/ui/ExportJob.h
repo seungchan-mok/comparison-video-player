@@ -50,12 +50,15 @@ struct ExportSpec {
 // Busy time of each stage (seconds), to see what limits an export.
 struct ExportStats {
     int64_t frames = 0;
+    int width = 0;  // the picture
+    int height = 0;
     double seconds = 0;
     std::array<double, 2> decode{};
     double render = 0;
     double encode = 0;
     int missing = 0;  // frames that could not be decoded (a neighbour was used)
     std::string encoder;
+    bool cancelled = false;
 };
 
 // Exports a range of the timeline as a video in the background, independent of playback:

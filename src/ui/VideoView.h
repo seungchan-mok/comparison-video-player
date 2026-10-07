@@ -37,6 +37,8 @@ public:
     // (Renderer::captureFactor), smaller if the GPU cannot hold that. *factor receives the
     // image's size over the screen's device pixels. Null when nothing could be drawn.
     QImage capture(double* factor);
+    // The view as the screen draws it now, without the cursor outline (an export of the view).
+    render::RenderState renderState();
 
     void fitToWindow();
     void oneToOne();

@@ -5,6 +5,7 @@
 #include "ui/ClipboardImage.h"
 #include "ui/ControlBar.h"
 #include "ui/DesktopIntegration.h"
+#include "ui/ExportProgress.h"
 #include "ui/HudOverlay.h"
 #include "ui/KeyRouter.h"
 #include "ui/LegendDialog.h"
@@ -16,6 +17,8 @@
 
 #include "ui/SettingsDialog.h"
 
+#include "render/OffscreenView.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -24,10 +27,12 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QGuiApplication>
+#include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
@@ -46,6 +51,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_hud(new HudOverlay(m_player, m_view))
     , m_keys(new KeyRouter(this, m_view, KeyMap::defaults(), [this] { return m_player->controller().positionShown(); }, this))
     , m_clipboard(new ClipboardImage(this))
+    , m_exportProgress(new ExportProgress(this))
 {
     setCentralWidget(m_stage);
     setAcceptDrops(true);
@@ -63,6 +69,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_view, &VideoView::compareChanged, m_hud, qOverload<>(&QWidget::update));
     connect(m_view, &VideoView::sampleChanged, this, [this](const render::PixelSample& s) { m_hud->setPixelText(formatPixelSample(s)); });
     connect(m_player, &Player::mediaChanged, m_hud, qOverload<>(&QWidget::update));
+    connect(m_player, &Player::mediaChanged, this, [this] { m_exportAction->setEnabled(m_player->slotOpen(0) || m_player->slotOpen(1)); });
     connect(m_clipboard, &ClipboardImage::copied, this, [this](QSize size) {
         m_hud->showMessage(tr("View copied to the clipboard (%1 x %2)").arg(size.width()).arg(size.height()));
         emit viewCopied(size, m_copyFactor);
@@ -384,6 +391,10 @@ void MainWindow::createMenus()
     QAction* closeB = file->addAction(tr("Close B"), this, [this] { m_player->close(1); updateTitle(); });
     closeB->setShortcut(QKeySequence(Qt::ControlModifier | Qt::ShiftModifier | Qt::Key_W));
     file->addSeparator();
+    m_exportAction = file->addAction(tr("&Export Comparison Video..."), this, &MainWindow::exportVideo);
+    m_exportAction->setShortcut(QKeySequence(Qt::ControlModifier | Qt::Key_E));
+    m_exportAction->setEnabled(false);
+    file->addSeparator();
     if (desktop::supported())
         file->addAction(tr("Make SCVP the Default Video Player..."), this, &MainWindow::offerDefaultPlayer);
     QAction* settings = file->addAction(tr("&Settings..."), this, &MainWindow::showSettings);
@@ -393,7 +404,7 @@ void MainWindow::createMenus()
     quit->setShortcut(QKeySequence::Quit);
     quit->setMenuRole(QAction::QuitRole);
     // App commands must also work while the menu bar is hidden (fullscreen).
-    addActions({openA, openB, close, closeB, settings, quit});
+    addActions({openA, openB, close, closeB, m_exportAction, settings, quit});
 
     QMenu* edit = menuBar()->addMenu(tr("&Edit"));
     playerAction(edit, Action::CopyView);
@@ -630,11 +641,157 @@ void MainWindow::dropEvent(QDropEvent* e)
 
 void MainWindow::closeEvent(QCloseEvent* e)
 {
+    if (m_export) {
+        if (QMessageBox::question(this, tr("Export running"), tr("An export is still running. Stop it and quit?"),
+                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+            e->ignore();
+            return;
+        }
+        m_export.reset();  // cancels, removes the partial output and waits for its threads
+    }
     if (isFullScreen())
         toggleFullscreen();
     m_settings.geometry = saveGeometry();
     m_settings.save();
     QMainWindow::closeEvent(e);
+}
+
+// The export of the videos and the view as they are now. Full frames: the comparison mode with
+// the videos 1:1 (scaled by the size option), labels as large as on a 1080-line screen. As on
+// screen: what Ctrl+C would copy, as large as a copy is drawn, for every frame of the range.
+std::optional<ExportSpec> MainWindow::exportSpec(const ExportOptions& o, QString* error)
+{
+    ExportSpec spec;
+    Engine& engine = m_player->engine();
+    for (int slot = 0; slot < Engine::kSlots; ++slot)
+        if (m_player->slotOpen(slot))
+            spec.sources[size_t(slot)] = engine.source(slot);
+    if (!spec.sources[0] && !spec.sources[1]) {
+        if (error)
+            *error = tr("Open a video first.");
+        return std::nullopt;
+    }
+    spec.hw = engine.hardware();
+    PlaybackController& pc = m_player->controller();
+    spec.mapper = pc.mapper();
+    const int64_t length = pc.length();
+    spec.first = std::clamp<int64_t>(o.first, 0, std::max<int64_t>(0, length - 1));
+    spec.last = o.last < o.first ? length - 1 : std::min<int64_t>(o.last, length - 1);
+    const double scale = std::clamp(o.scale, 1, 100) / 100.0;
+    render::RenderState screen = m_view->renderState();
+    double textScale = 1.0;
+    if (o.picture == ExportPicture::Screen) {
+        // As large as a copy (no shown video minified), then the size option.
+        const double f = render::Renderer::captureFactor(screen, render::Renderer::kMaxCaptureSide, render::Renderer::kMaxCapturePixels) * scale;
+        spec.view = render::Renderer::captureState(screen, f);
+        textScale = screen.devicePixelRatio * f;
+    } else {
+        const VideoInfo info = engine.info(spec.sources[0] ? 0 : 1);
+        const QSizeF image = info.width > 0 ? QSizeF(info.width, info.height) : screen.view.imageSize();
+        spec.view = render::OffscreenView::fullFrameState(screen, image, spec.sources[0] != nullptr, spec.sources[1] != nullptr, scale);
+        textScale = std::max(1.0, image.height() * scale / 1080.0);
+    }
+    spec.view.frames = {};
+    spec.labels = o.labels;
+    spec.legend = m_hud->legendVisible();
+    spec.frameInfo = o.frameInfo;
+    spec.scene = m_hud->scene();
+    spec.scene.dpr = textScale;
+    spec.mono = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    spec.encoder.format = o.format;
+    spec.encoder.encoder = o.encoder.toStdString();
+    spec.encoder.quality = o.quality;
+    spec.encoder.frameRate = av_d2q(spec.mapper.fps(), 1001000);
+    spec.path = o.path.toUtf8().toStdString();
+    return spec;
+}
+
+bool MainWindow::startExport(const ExportOptions& o, QString* error)
+{
+    QString err;
+    std::optional<ExportSpec> spec;
+    if (m_export)
+        err = tr("An export is already running.");
+    else if (o.path.isEmpty())
+        err = tr("No file to export to.");
+    else
+        spec = exportSpec(o, &err);
+    // Frame numbers are final only once every video is indexed.
+    for (int slot = 0; spec && slot < Engine::kSlots; ++slot)
+        if (spec->sources[size_t(slot)] && !spec->sources[size_t(slot)]->indexComplete()) {
+            err = tr("The videos are still being indexed.");
+            spec.reset();
+        }
+    if (!spec) {
+        if (error)
+            *error = err;
+        return false;
+    }
+    m_export = std::make_unique<ExportJob>(std::move(*spec));
+    connect(m_export.get(), &ExportJob::finished, this, &MainWindow::exportDone);
+    m_exportProgress->start(m_export.get(), o.path);
+    m_export->start();
+    return true;
+}
+
+void MainWindow::exportDone(bool ok, const QString& message)
+{
+    m_lastExport = m_export->stats();
+    m_exportProgress->finish(ok, message, m_lastExport);
+    const QString name = QFileInfo(QString::fromStdString(m_export->spec().path)).fileName();
+    m_hud->showMessage(ok                     ? tr("Exported %1").arg(name)
+                       : m_lastExport.cancelled ? tr("Export cancelled")
+                                                : tr("Export failed: %1").arg(message),
+                       4000);
+    m_export.release()->deleteLater();  // its threads are done; it is still emitting
+    emit exportFinished(ok, message);
+}
+
+void MainWindow::exportVideo()
+{
+    if (m_export) {
+        m_exportProgress->show();
+        m_exportProgress->raise();
+        return;
+    }
+    if (!m_player->slotOpen(0) && !m_player->slotOpen(1))
+        return;
+    ExportOptions initial = ExportOptions::load();
+    QString dir = initial.lastDir();
+    if (dir.isEmpty())
+        dir = m_settings.lastDir.isEmpty() ? QDir::homePath() : m_settings.lastDir;
+    QStringList names;
+    for (int slot = 0; slot < Engine::kSlots; ++slot)
+        if (m_player->slotOpen(slot))
+            names << QFileInfo(QString::fromStdString(m_player->engine().info(slot).path)).completeBaseName();
+    initial.path = QDir(dir).filePath(names.join(QStringLiteral("_vs_")) + QLatin1Char('.') + QLatin1String(VideoEncoder::extension(initial.format)));
+    auto timeline = [this] {
+        ExportTimeline t;
+        PlaybackController& pc = m_player->controller();
+        t.length = pc.length();
+        for (int slot = 0; slot < Engine::kSlots; ++slot)
+            if (m_player->slotOpen(slot)) {
+                const SlotStats st = m_player->engine().stats(slot);
+                t.final = t.final && st.indexComplete;
+                t.indexProgress = std::min(t.indexProgress, st.indexProgress);
+            }
+        t.hasLoop = pc.hasLoop();
+        t.loopFirst = pc.loopFirst();
+        t.loopLast = pc.loopLast();
+        t.fps = pc.frameRate();
+        return t;
+    };
+    auto size = [this](const ExportOptions& o) {
+        const std::optional<ExportSpec> s = exportSpec(o, nullptr);
+        return s ? s->view.framebufferSize : QSize();
+    };
+    const std::optional<ExportOptions> chosen = ExportDialog::ask(this, initial, timeline, size);
+    if (!chosen)
+        return;
+    chosen->save();
+    QString err;
+    if (!startExport(*chosen, &err))
+        QMessageBox::warning(this, tr("Cannot export"), err);
 }
 
 } // namespace scvp::ui

@@ -524,6 +524,9 @@ void ExportJob::finish()
         error = m_error;
         m_stats.frames = m_encoded.load();
         m_stats.seconds = secondsSince(m_startTime);
+        m_stats.cancelled = error.empty() && m_cancel;
+        m_stats.width = m_spec.view.framebufferSize.width();
+        m_stats.height = m_spec.view.framebufferSize.height();
     }
     if (!error.empty())
         emit finished(false, QString::fromStdString(error));

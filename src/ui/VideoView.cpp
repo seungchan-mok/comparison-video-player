@@ -178,6 +178,15 @@ QImage VideoView::capture(double* factor)
     return img;
 }
 
+render::RenderState VideoView::renderState()
+{
+    updateGeometry();
+    render::RenderState s = m_state;
+    s.probe = false;
+    s.sampleProbe = false;
+    return s;
+}
+
 void VideoView::leaveEvent(QEvent* e)
 {
     m_hovering = false;
