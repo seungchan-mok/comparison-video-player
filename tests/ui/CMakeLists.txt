@@ -12,3 +12,6 @@ if(UNIX AND NOT APPLE)
     target_compile_definitions(tst_desktopintegration PRIVATE SCVP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 endif()
 scvp_add_test(tst_overlaypainter tst_overlaypainter.cpp LIBS scvp::ui)
+scvp_add_test(tst_exportjob tst_exportjob.cpp LIBS scvp::ui scvp_gltestsupport
+    FUNCTIONS alignedDifferenceIsBlack splitIsTheRenderedPair overlayStaysInItsCorners rangeAsPngSequence
+              cancelLeavesNothing drawingOnTheGuiThread encoderErrorsAreReported)

@@ -64,6 +64,10 @@ public:
     bool isOpen(int slot) const;
     VideoInfo info(int slot) const;
     FrameIndexPtr index(int slot) const;
+    // The slot's video for decoding of its own (an export): its index is already scanned, and
+    // it stays usable after the slot is closed or swapped. Sessions it opens are independent
+    // of the slot's lane and cache.
+    std::shared_ptr<IVideoSource> source(int slot) const;
 
     void setMemoryBudget(size_t bytes);
     size_t memoryBudget() const;
@@ -94,7 +98,7 @@ public:
 private:
     struct Slot {
         uint64_t epoch = 0;
-        std::unique_ptr<IVideoSource> source;
+        std::shared_ptr<IVideoSource> source;  // shared with exports (source())
         std::shared_ptr<FramePool> pool;
         std::unique_ptr<FrameCache> cache;
         std::unique_ptr<WantMailbox> mailbox;
