@@ -103,6 +103,13 @@ jobs:
           cmake --build --preset release
           cd build/release
           cpack
+      - name: Check package
+        # The zip must run on a clean PC: every import shipped (FFmpeg's own DLLs, the VC++
+        # runtime), and the program opens a video with nothing but Windows on PATH.
+        run: |
+          ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=320x240:rate=25 -frames:v 25 -c:v mpeg4 -q:v 2 clip.mp4
+          Expand-Archive (Get-Item build/release/scvp-*.zip).FullName -DestinationPath unpacked
+          scripts/check-windows-bundle.ps1 -Dir (Get-ChildItem unpacked -Directory)[0].FullName -Clip clip.mp4
       - uses: actions/upload-artifact@v4
         with:
           name: scvp-windows

@@ -59,7 +59,7 @@ FFmpeg DLL은 빌드 시 실행 파일 옆으로 복사됩니다.
 
 ```bash
 cmake --preset release && cmake --build --preset release
-cd build/release && cpack     # Linux: tar.gz, Windows: zip (windeployqt 포함), macOS: dmg
+cd build/release && cpack     # Linux: tar.gz, Windows: zip (Qt·FFmpeg DLL·VC++ 런타임 포함), macOS: dmg
 ```
 
 CI(`.github/workflows/build.yml`)가 세 OS에서 빌드·테스트·패키지를 만듭니다.
