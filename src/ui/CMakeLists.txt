@@ -12,6 +12,7 @@ add_library(scvp_ui STATIC
     LegendDialog.h LegendDialog.cpp
     MainWindow.h MainWindow.cpp
     OpenRawDialog.h OpenRawDialog.cpp
+    OverlayPainter.h OverlayPainter.cpp
     PixelInspector.h PixelInspector.cpp
     Player.h Player.cpp
     Settings.h Settings.cpp

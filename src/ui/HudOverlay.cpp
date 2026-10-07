@@ -83,7 +83,7 @@ void HudOverlay::setInfoVisible(bool on)
     update();
 }
 
-QColor HudOverlay::slotColor(int slot) { return slot == 0 ? QColor(255, 138, 61) : QColor(41, 182, 197); }
+QColor HudOverlay::slotColor(int slot) { return overlay::slotColor(slot); }
 
 void HudOverlay::setLegendVisible(bool on)
 {
@@ -253,125 +253,21 @@ QStringList HudOverlay::lines() const
     return out;
 }
 
-// Which video each part of the view shows, and whether it is holding an end frame.
-void HudOverlay::paintPaneLabels(QPainter& p, const QFontMetrics& fm)
+OverlayScene HudOverlay::scene() const
 {
-    auto* view = qobject_cast<const VideoView*>(parentWidget());
-    if (!view || !m_player->slotOpen(0) || !m_player->slotOpen(1))
-        return;
-    const double dpr = view->devicePixelRatioF();
-    const render::CompareLayout layout = view->layout();
-    const render::CompareSettings& c = view->compare();
-    auto label = [&](int slot) {
-        QString t = slot == 0 ? QStringLiteral("A") : QStringLiteral("B");
-        if (m_player->shown(slot).hold)
-            t += tr(" HOLD");
-        return t;
-    };
-    auto draw = [&](QPoint at, const QString& t, bool right, bool warn) {
-        const int w = fm.horizontalAdvance(t) + 10;
-        const QRect box(right ? at.x() - w : at.x(), at.y(), w, fm.height() + 4);
-        p.fillRect(box, warn ? QColor(150, 90, 0, 200) : QColor(0, 0, 0, 150));
-        p.setPen(QColor(240, 240, 240));
-        p.drawText(box, Qt::AlignCenter, t);
-    };
-    const int top = m_info ? -1 : 8;  // the info box takes the top-left corner
-    for (const render::Pane& pane : layout.panes) {
-        const QRect r(QPoint(int(pane.rect.x() / dpr), int(pane.rect.y() / dpr)),
-                      QSize(int(pane.rect.width() / dpr), int(pane.rect.height() / dpr)));
-        const int y = top < 0 ? r.bottom() - fm.height() - 12 : r.top() + top;
-        if (layout.panes.size() > 1 || c.mode == render::CompareMode::Flip) {
-            draw(QPoint(r.right() - 8, y), label(pane.slot), true, m_player->shown(pane.slot).hold);
-        } else if (c.mode == render::CompareMode::Wipe) {
-            const int x = r.left() + int(c.wipe * r.width());
-            draw(QPoint(x - 6, y), label(0), true, m_player->shown(0).hold);
-            draw(QPoint(x + 6, y), label(1), false, m_player->shown(1).hold);
-        } else {
-            const QString t = QStringLiteral("|A-B| x%1").arg(c.diffGain);
-            draw(QPoint(r.right() - 8, y), t, true, m_player->shown(0).hold || m_player->shown(1).hold);
-        }
+    OverlayScene s;
+    if (auto* view = qobject_cast<const VideoView*>(parentWidget())) {
+        s.layout = view->layout();
+        s.dpr = view->devicePixelRatioF();
+        s.compare = view->compare();
     }
-}
-
-// Legend: a coloured A/B chip and the file name (or the user's text) in each part of the view
-// (for wipe: A at the left edge, B at the right; for the difference: both). Kept clear of the
-// info box.
-void HudOverlay::paintLegend(QPainter& p, const QRect& avoid)
-{
-    auto* view = qobject_cast<const VideoView*>(parentWidget());
-    if (!view || (!m_player->slotOpen(0) && !m_player->slotOpen(1)))
-        return;
-    QFont nameFont = font();
-    nameFont.setPointSizeF(nameFont.pointSizeF() * 1.2);
-    QFont chipFont = nameFont;
-    chipFont.setBold(true);
-    const QFontMetrics fm(nameFont);
-    const int h = fm.height() + 10;
-    const int pad = 6;
-
-    // A legend entry: [chip] name [chip] name ... (one or two videos), right-aligned if asked.
-    auto entry = [&](QPoint at, const QList<int>& ids, bool right, const QString& suffix, int maxWidth) {
-        QList<QString> names;
-        int w = pad;
-        const int nameRoom = std::max(60, (maxWidth - int(ids.size()) * (h + 2 * pad)) / std::max<int>(1, int(ids.size())));
-        for (int slot : ids) {
-            QString n = slotName(slot);
-            if (m_player->shown(slot).hold)
-                n += tr("  HOLD");
-            n = fm.elidedText(n, Qt::ElideMiddle, nameRoom);
-            names << n;
-            w += h - 4 + pad + fm.horizontalAdvance(n) + pad;
-        }
-        if (!suffix.isEmpty())
-            w += fm.horizontalAdvance(suffix) + pad;
-        QRect box(right ? at.x() - w : at.x(), at.y(), w, h);
-        if (box.intersects(avoid))
-            box.moveTop(avoid.bottom() + 8);
-        p.setPen(Qt::NoPen);
-        p.setBrush(QColor(0, 0, 0, 170));
-        p.drawRoundedRect(box, 6, 6);
-        int x = box.left() + pad;
-        for (int i = 0; i < ids.size(); ++i) {
-            const int slot = ids[i];
-            const QRect chip(x, box.top() + 2, h - 4, h - 4);
-            p.setBrush(slotColor(slot));
-            p.drawRoundedRect(chip, 4, 4);
-            p.setFont(chipFont);
-            p.setPen(QColor(20, 20, 24));
-            p.drawText(chip, Qt::AlignCenter, slot == 0 ? QStringLiteral("A") : QStringLiteral("B"));
-            x = chip.right() + 1 + pad;
-            p.setFont(nameFont);
-            p.setPen(m_player->shown(slot).hold ? QColor(255, 200, 90) : QColor(245, 245, 245));
-            p.drawText(QRect(x, box.top(), fm.horizontalAdvance(names[i]) + 1, h), Qt::AlignVCenter | Qt::AlignLeft, names[i]);
-            x += fm.horizontalAdvance(names[i]) + pad;
-            p.setPen(Qt::NoPen);
-        }
-        if (!suffix.isEmpty()) {
-            p.setFont(nameFont);
-            p.setPen(QColor(200, 200, 200));
-            p.drawText(QRect(x, box.top(), fm.horizontalAdvance(suffix) + 1, h), Qt::AlignVCenter | Qt::AlignLeft, suffix);
-            p.setPen(Qt::NoPen);
-        }
-    };
-
-    const double dpr = view->devicePixelRatioF();
-    const render::CompareLayout layout = view->layout();
-    const render::CompareSettings& c = view->compare();
-    const bool both = m_player->slotOpen(0) && m_player->slotOpen(1);
-    for (const render::Pane& pane : layout.panes) {
-        const QRect r(QPoint(int(pane.rect.x() / dpr), int(pane.rect.y() / dpr)),
-                      QSize(int(pane.rect.width() / dpr), int(pane.rect.height() / dpr)));
-        const int room = r.width() - 20;
-        const QPoint topLeft(r.left() + 10, r.top() + 10);
-        if (!both || layout.panes.size() > 1 || c.mode == render::CompareMode::Flip) {
-            entry(topLeft, {pane.slot}, false, QString(), room);
-        } else if (c.mode == render::CompareMode::Wipe) {
-            entry(topLeft, {0}, false, QString(), room / 2 - 10);
-            entry(QPoint(r.right() - 10, r.top() + 10), {1}, true, QString(), room / 2 - 10);
-        } else {
-            entry(topLeft, {0, 1}, false, QStringLiteral("|A-B| x%1").arg(c.diffGain), room);
-        }
+    for (int slot = 0; slot < Engine::kSlots; ++slot) {
+        s.open[size_t(slot)] = m_player->slotOpen(slot);
+        s.hold[size_t(slot)] = m_player->shown(slot).hold;
+        s.names[size_t(slot)] = slotName(slot);
     }
+    s.font = font();
+    return s;
 }
 
 // The flip indicator: which video is on screen now, big, fading out.
@@ -488,10 +384,10 @@ void HudOverlay::paintContent(QPainter& p, bool capture)
         infoBox = QRect(8, 8, w + 16, fm.lineSpacing() * int(infoLines.size()) + 12);
     }
     if (m_legend) {
-        paintLegend(p, infoBox);
+        overlay::paintLegend(p, scene(), infoBox);
         p.setFont(mono);
     } else {
-        paintPaneLabels(p, fm);
+        overlay::paintPaneLabels(p, scene(), fm, m_info);
     }
     if (!m_pixelText.isEmpty()) {
         const int h = fm.height() + 8;

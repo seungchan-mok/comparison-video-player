@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ui/OverlayPainter.h"
+
 #include <QElapsedTimer>
 #include <QTimer>
 
@@ -45,6 +47,8 @@ public:
     // values line) onto `p`, whose logical size is the overlay's; the stall badge, the flip
     // indicator and messages are transient and left out.
     void paintCapture(QPainter& p);
+    // What the legend and the labels show now (layout and settings of the view, names, HOLD).
+    OverlayScene scene() const;
 
 protected:
     void paintEvent(QPaintEvent* e) override;
@@ -55,8 +59,6 @@ private:
     void paintMessage(QPainter& p);
     QStringList lines() const;
     QString pathText(int slot) const;
-    void paintPaneLabels(QPainter& p, const QFontMetrics& fm);
-    void paintLegend(QPainter& p, const QRect& avoid);
     void paintFlash(QPainter& p);
     static QStringList wrapLine(const QString& line, const QFontMetrics& fm, int maxWidth);
     void sampleRates();  // refresh timer: frame rates over the last second
