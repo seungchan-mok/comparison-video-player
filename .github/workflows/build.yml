@@ -99,9 +99,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Dependencies
-        run: brew install qt ffmpeg ninja pkg-config
+        # qtbase only: the full qt formula brings plugins whose frameworks the app does not ship.
+        run: brew install qtbase ffmpeg ninja pkg-config
       - name: Configure
-        run: cmake --preset dev -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+        run: cmake --preset dev -DCMAKE_PREFIX_PATH="$(brew --prefix qtbase)"
       - name: Build
         run: cmake --build --preset dev
       - name: Test fixtures
@@ -110,9 +111,13 @@ jobs:
         run: ctest --preset dev
       - name: Package
         run: |
-          cmake --preset release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+          cmake --preset release -DCMAKE_PREFIX_PATH="$(brew --prefix qtbase)"
           cmake --build --preset release
           cd build/release && cpack
+      - name: Check package
+        # Nothing in the app comes from Homebrew; the app from the dmg plays a clip with
+        # /opt/homebrew moved away.
+        run: scripts/check-macos-bundle.sh build/release/scvp-*.dmg tests/fixtures/out/h264_b.mp4
       - uses: actions/upload-artifact@v4
         with:
           name: scvp-macos

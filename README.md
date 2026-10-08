@@ -38,8 +38,8 @@ sudo 없이 개발할 때는 `scripts/fetch-ubuntu-deps.sh` 가 패키지를 `.d
 ### macOS
 
 ```bash
-brew install qt ffmpeg cmake ninja pkg-config
-cmake --preset dev -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+brew install qtbase ffmpeg cmake ninja pkg-config
+cmake --preset dev -DCMAKE_PREFIX_PATH="$(brew --prefix qtbase)"
 cmake --build --preset dev
 open build/dev/src/scvp.app
 ```
