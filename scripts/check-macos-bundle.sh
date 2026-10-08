@@ -24,7 +24,11 @@ while IFS= read -r -d '' f; do
   kind="$(file -b "$f")"
   [[ "$kind" == *Mach-O* ]] || continue
   n=$((n + 1))
-  refs="$(otool -L "$f" | tail -n +2 | awk '{print $1}' | grep -E '^(/opt/homebrew|/usr/local|/opt/local)/' || true)"
+  # otool -L also lists a library's own install name (LC_ID_DYLIB), which is never loaded:
+  # macdeployqt leaves Homebrew's there for the Qt frameworks. Only the libraries it loads count.
+  own="$(otool -D "$f" | tail -n +2)"
+  refs="$(otool -L "$f" | tail -n +2 | awk '{print $1}' | grep -vxF "${own:-/}" |
+          grep -E '^(/opt/homebrew|/usr/local|/opt/local)/' || true)"
   if [[ -n "$refs" ]]; then
     echo "${f#"$app"/} uses: $(echo "$refs" | tr '\n' ' ')"
     bad=1
