@@ -14,7 +14,7 @@ build/dev/src/scvp a.mp4 b.mp4 --view diff --offset -3
 ```
 
 - API 하한은 **Qt 6.4, FFmpeg 6.1**(Ubuntu 24.04)이고, CI의 Linux 빌드가 정확히 이 버전으로 확인합니다. FFmpeg 버전 차이는 모두 `engine/FfmpegCompat.h`(FFmpeg의 유일한 include 지점, 버전 비교는 `AV_VERSION_INT`)에서 처리합니다. `FFMPEG_ROOT=<prefix>` 를 주면 pkg-config 대신 그 경로를 씁니다([cmake/ScvpFFmpeg.cmake](cmake/ScvpFFmpeg.cmake)).
-- `release` 프리셋은 테스트를 빌드하지 않습니다. 패키지: build/release 에서 `cpack`, 또는 [scripts/package-linux.sh](scripts/package-linux.sh) 로 `dist/` 에 독립 실행 번들 생성.
+- `release` 프리셋은 테스트를 빌드하지 않습니다. 패키지: Windows/macOS 는 build/release 에서 `cpack`. Linux 릴리즈는 [scripts/package-linux.sh](scripts/package-linux.sh)(docker만 필요): glibc 2.28 컨테이너([packaging/linux/Dockerfile](packaging/linux/Dockerfile), Qt 6.8 + 그 안에서 빌드하는 LGPL FFmpeg 8.1)에서 `dist/` 에 독립 실행 번들을 만들고, 스스로 검사합니다(GLIBC 2.28 초과 심볼, 풀리지 않는 라이브러리). 시스템에서 가져오는 라이브러리 목록은 스크립트의 `excluded`. 깨끗한 배포판에서의 확인은 [scripts/smoke-linux-bundle.sh](scripts/smoke-linux-bundle.sh), Windows 패키지는 [scripts/check-windows-bundle.ps1](scripts/check-windows-bundle.ps1)(CI).
 - 성능 측정: `build/dev/tools/scvp-bench <video> --scenario seq|realtime|random|backstep|cached --hw cpu|gpu --json`(두 영상은 `--with <B> --scenario lockstep`), `QT_QPA_PLATFORM=offscreen build/dev/tests/render/bench_render`, 내보내기 단계별 사용률은 `QT_QPA_PLATFORM=offscreen build/dev/tests/ui/bench_export A B --format hevc|h264|ffv1 --frames N`(둘 다 ctest 아님).
 
 ## 테스트

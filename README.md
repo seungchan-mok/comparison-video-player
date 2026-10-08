@@ -58,17 +58,23 @@ FFmpeg DLL은 빌드 시 실행 파일 옆으로 복사됩니다.
 ### 패키지
 
 ```bash
+scripts/package-linux.sh      # Linux 릴리즈 번들 (docker만 필요, 아래 참고)
 cmake --preset release && cmake --build --preset release
-cd build/release && cpack     # Linux: tar.gz, Windows: zip (Qt·FFmpeg DLL·VC++ 런타임 포함), macOS: dmg
+cd build/release && cpack     # Windows: zip (Qt·FFmpeg DLL·VC++ 런타임 포함), macOS: dmg
 ```
 
-CI(`.github/workflows/build.yml`)가 세 OS에서 빌드·테스트·패키지를 만듭니다.
+CI(`.github/workflows/build.yml`)가 세 OS에서 빌드·테스트·패키지를 만들고, 패키지가 다른 설치 없이 실행되는지 확인합니다(Linux: 여러 배포판의 깨끗한 컨테이너, Windows: Windows만 PATH에 둔 실행과 설치·삭제).
+
+`scripts/package-linux.sh` 는 glibc 2.28 컨테이너([packaging/linux/Dockerfile](packaging/linux/Dockerfile): Qt 6.8, 거기서 빌드하는 LGPL FFmpeg)에서 번들을 만들고, 시스템 기본 라이브러리(glibc, OpenGL, X11, fontconfig 등) 외에는 모두 넣습니다. `scripts/smoke-linux-bundle.sh <이미지> <tar.gz> <클립>` 으로 원하는 배포판에서 확인할 수 있습니다.
 
 ### Linux 설치 (터미널 없이 실행, 기본 프로그램)
 
+릴리즈의 `scvp-<버전>-linux-x86_64.tar.gz` 는 Ubuntu 20.04 이상, Debian 12 이상, Fedora, RHEL/Rocky 8 이상(x86_64; glibc 2.28 이상인 다른 배포판도 대개 동작)에서 따로 설치할 것 없이 실행됩니다. Qt와 FFmpeg가 들어 있습니다(시스템 FFmpeg 불필요).
+
 ```bash
-scripts/package-linux.sh                      # dist/scvp-<버전>-linux-x86_64/ 와 .tar.gz 생성 (Qt 포함)
-dist/scvp-*-linux-x86_64/install.sh           # 현재 사용자에게 설치 (root 불필요)
+tar xzf scvp-*-linux-x86_64.tar.gz
+scvp-*-linux-x86_64/install.sh                # 현재 사용자에게 설치 (root 불필요)
+scvp-*-linux-x86_64/scvp a.mp4 b.mp4          # 또는 설치 없이 바로 실행
 ```
 
 - 프로그램은 `~/.local/opt/scvp`, 실행 링크는 `~/.local/bin/scvp` 에 설치되고, 애플리케이션 메뉴(활동 → "SCVP" 검색, 독에 고정 가능), 아이콘, 파일 형식이 등록됩니다.
@@ -76,7 +82,8 @@ dist/scvp-*-linux-x86_64/install.sh           # 현재 사용자에게 설치 (r
 - 그냥 설치하면 기존 기본 프로그램은 바뀌지 않습니다. 다만 다른 프로그램이 열지 못하던 raw 형식(.h264/.h265/.yuv/.y4m/.ivf 등)은 SCVP로 열립니다.
 - 기본 프로그램으로 쓰려면: 앱 메뉴 **File → Make SCVP the Default Video Player...**, 또는 `install.sh --set-default`, 또는 설정 → 앱 → 기본 앱 → 비디오. 되돌릴 때도 설정 → 기본 앱에서 고르면 됩니다.
 - 삭제: `~/.local/opt/scvp/install.sh --uninstall` (SCVP를 가리키는 기본 프로그램 설정도 함께 지웁니다).
-- FFmpeg 라이브러리는 시스템 것을 씁니다(Ubuntu 24.04: `sudo apt install ffmpeg`).
+- 하드웨어 디코딩: NVIDIA(NVDEC, 드라이버 470 이상)는 그대로, Intel/AMD(VA-API)는 시스템의 VA-API 드라이버가 있으면 씁니다.
+- 영상 내보내기 인코더: NVIDIA GPU가 있으면 NVENC(H.264/HEVC), 없으면 H.264는 OpenH264, 그 밖에 FFV1과 PNG. 번들의 FFmpeg는 LGPL 빌드라 x264/x265는 들어 있지 않습니다.
 
 ### Windows 설치
 
