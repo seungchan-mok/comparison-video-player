@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Builds the portable Linux bundle dist/scvp-<version>-linux-x86_64/ (+ .tar.gz). It runs on
-# Ubuntu 20.04+, Debian 10+, RHEL 8+ and Fedora with nothing else to install: Qt, FFmpeg and
+# Builds the portable Linux bundle dist/scvp-<version>-linux-x86_64/ (+ .tar.gz, and the same as
+# one file, dist/scvp-<version>-x86_64.AppImage). It runs on
+# Ubuntu 20.04+, Debian 12+, RHEL 8+ and Fedora (tested: scripts/smoke-linux-bundle.sh; other
+# distributions with glibc 2.28+ generally) with nothing else to install: Qt, FFmpeg and
 # the libraries a desktop may lack are inside. Only what every desktop with a GPU driver has
 # comes from the system (the `excluded` list below: glibc, libstdc++, OpenGL, X11 and the xcb
 # libraries Mesa uses, fontconfig, glib, dbus, ...). Taking those from the system is what keeps
@@ -144,6 +146,23 @@ done
 [[ $fail == 0 ]] || { echo "bundle check failed" >&2; exit 1; }
 
 tar -C dist -czf "$OUT.tar.gz" "$NAME"
+
+# The same bundle as one AppImage file: the launcher is AppRun, and the desktop entry and icon
+# sit at the top as the format wants. install.sh is left out (it installs an unpacked folder).
+APPIMAGE="dist/scvp-${VERSION}-x86_64.AppImage"
+APPDIR="$BUILD/AppDir"
+rm -rf "$APPDIR" "$APPIMAGE"
+cp -a "$OUT" "$APPDIR"
+rm "$APPDIR/install.sh"
+ln -s scvp "$APPDIR/AppRun"
+cp packaging/scvp.desktop "$APPDIR/scvp.desktop"
+cp "$OUT/share/icons/hicolor/256x256/apps/scvp.png" "$APPDIR/scvp.png"
+ln -s scvp.png "$APPDIR/.DirIcon"
+ARCH=x86_64 VERSION="$VERSION" appimagetool --no-appstream --runtime-file /opt/appimagetool/runtime-x86_64 \
+  "$APPDIR" "$APPIMAGE" >/dev/null 2>&1 || { echo "appimagetool failed" >&2; exit 1; }
+rm -rf "$APPDIR"
+
 echo "bundled: $(ls "$OUT/lib" | tr '\n' ' ')"
-du -sh "$OUT" "$OUT.tar.gz"
+du -sh "$OUT" "$OUT.tar.gz" "$APPIMAGE"
 echo "Run: $OUT/scvp [A] [B]    Install for this user: $OUT/install.sh [--set-default]"
+echo "     $APPIMAGE [A] [B]"

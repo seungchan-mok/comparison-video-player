@@ -65,7 +65,7 @@ cd build/release && cpack     # Windows: zip (Qt·FFmpeg DLL·VC++ 런타임 포
 
 CI(`.github/workflows/build.yml`)가 세 OS에서 빌드·테스트·패키지를 만들고, 패키지가 다른 설치 없이 실행되는지 확인합니다(Linux: 여러 배포판의 깨끗한 컨테이너, Windows: Windows만 PATH에 둔 실행과 설치·삭제).
 
-`scripts/package-linux.sh` 는 glibc 2.28 컨테이너([packaging/linux/Dockerfile](packaging/linux/Dockerfile): Qt 6.8, 거기서 빌드하는 LGPL FFmpeg)에서 번들을 만들고, 시스템 기본 라이브러리(glibc, OpenGL, X11, fontconfig 등) 외에는 모두 넣습니다. `scripts/smoke-linux-bundle.sh <이미지> <tar.gz> <클립>` 으로 원하는 배포판에서 확인할 수 있습니다.
+`scripts/package-linux.sh` 는 tar.gz와 AppImage를 glibc 2.28 컨테이너([packaging/linux/Dockerfile](packaging/linux/Dockerfile): Qt 6.8, 거기서 빌드하는 LGPL FFmpeg)에서 번들을 만들고, 시스템 기본 라이브러리(glibc, OpenGL, X11, fontconfig 등) 외에는 모두 넣습니다. `scripts/smoke-linux-bundle.sh <이미지> <tar.gz> <클립>` 으로 원하는 배포판에서 확인할 수 있습니다.
 
 ### Linux 설치 (터미널 없이 실행, 기본 프로그램)
 
@@ -76,6 +76,8 @@ tar xzf scvp-*-linux-x86_64.tar.gz
 scvp-*-linux-x86_64/install.sh                # 현재 사용자에게 설치 (root 불필요)
 scvp-*-linux-x86_64/scvp a.mp4 b.mp4          # 또는 설치 없이 바로 실행
 ```
+
+설치 없이 파일 하나로 쓰려면 `scvp-<버전>-x86_64.AppImage`: `chmod +x` 후 실행합니다(내용은 tar.gz와 같음, libfuse2 불필요). FUSE를 쓸 수 없는 환경(컨테이너 등)에서는 `--appimage-extract-and-run` 을 붙이거나 tar.gz를 쓰세요. 메뉴 등록·기본 프로그램 설정은 tar.gz의 `install.sh` 로 합니다.
 
 - 프로그램은 `~/.local/opt/scvp`, 실행 링크는 `~/.local/bin/scvp` 에 설치되고, 애플리케이션 메뉴(활동 → "SCVP" 검색, 독에 고정 가능), 아이콘, 파일 형식이 등록됩니다.
 - 영상 파일을 오른쪽 클릭 → **다른 애플리케이션으로 열기 → SCVP**. 두 파일을 선택해 열면 A/B 비교로 열립니다.

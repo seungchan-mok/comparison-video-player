@@ -12,7 +12,8 @@
 #    launcher's choice of system or bundled libva).
 # 2. With Xvfb and Mesa added, the launcher opens each clip (H.264, HEVC 10-bit, VP9, AV1 through
 #    dav1d, a PNG sequence, raw NV12, an A/B pair) with LD_BIND_NOW=1, so a symbol missing from
-#    a system library fails at once, and saves a frame that is not blank.
+#    a system library fails at once, and saves a frame that is not blank. So does the AppImage
+#    next to the tarball, if there is one.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -75,25 +76,29 @@ inside() {
 
   # shellcheck disable=SC2086
   pkgs $xvfb
-  local runs=(
-    "$clips/h264.mp4" "$clips/hevc10.mkv" "$clips/vp9.webm" "$clips/av1.mkv" "$clips/png_seq"
-    "$clips/clip_320x240_nv12.yuv" "$clips/h264.mp4|$clips/hevc10.mkv|--view|diff"
-  )
-  local r out png log fail=0
-  for r in "${runs[@]}"; do
-    IFS='|' read -r -a args <<<"$r"
-    png=/tmp/grab.png
+  local fail=0 log=""
+  # grab LABEL PROGRAM ARGS...: the program opens ARGS and saves a frame that is not blank.
+  grab() {
+    local label="$1" png=/tmp/grab.png
+    shift
     rm -f "$png"
-    log="$(LD_BIND_NOW=1 timeout 120 bash /scripts/xvfb-run.sh "$b/scvp" "${args[@]}" \
-             --debug-size 700x600 --debug-grab "$png" 2>&1)" || true
-    out="${r//$clips\//}"
+    log="$(LD_BIND_NOW=1 timeout 120 bash /scripts/xvfb-run.sh "$@" --debug-size 700x600 --debug-grab "$png" 2>&1)" || true
     if grep -q '^debug-grab: saved' <<<"$log" && [[ -f "$png" && $(stat -c %s "$png") -gt 10000 ]]; then
-      echo "ok   $out ($(stat -c %s "$png") bytes)"
+      echo "ok   $label ($(stat -c %s "$png") bytes)"
     else
-      echo "FAIL $out"; echo "$log" | tail -20; fail=1
+      echo "FAIL $label"; echo "$log" | tail -20; fail=1
     fi
+  }
+  local c
+  for c in h264.mp4 hevc10.mkv vp9.webm av1.mkv png_seq clip_320x240_nv12.yuv; do
+    grab "$c" "$b/scvp" "$clips/$c"
   done
+  grab "A/B diff" "$b/scvp" "$clips/h264.mp4" "$clips/hevc10.mkv" --view diff
   grep -m1 '^scvp ' <<<"$log" || true
+  # The AppImage, unpacked by its runtime (containers have no FUSE).
+  if [[ -e /scvp.AppImage ]]; then
+    grab "AppImage hevc10.mkv" env APPIMAGE_EXTRACT_AND_RUN=1 /scvp.AppImage "$clips/hevc10.mkv"
+  fi
   [[ $fail == 0 ]] || exit 1
 }
 
@@ -107,7 +112,10 @@ case "${1:-}" in
     trap 'rm -rf "$tmp"' EXIT
     tar -C "$tmp" -xzf "$tarball"
     bundle="$(find "$tmp" -mindepth 1 -maxdepth 1 -type d)"
-    docker run --rm -v "$bundle:/bundle:ro" -v "$clips:/clips:ro" -v "$ROOT/scripts:/scripts:ro" "$image" \
-      bash /scripts/smoke-linux-bundle.sh --inside /bundle /clips "$@"
+    # The AppImage package-linux.sh made next to the tarball, if there.
+    appimage="${tarball%-linux-x86_64.tar.gz}-x86_64.AppImage"
+    mounts=(-v "$bundle:/bundle:ro" -v "$clips:/clips:ro" -v "$ROOT/scripts:/scripts:ro")
+    [[ -f "$appimage" ]] && mounts+=(-v "$appimage:/scvp.AppImage:ro")
+    docker run --rm "${mounts[@]}" "$image" bash /scripts/smoke-linux-bundle.sh --inside /bundle /clips "$@"
     ;;
 esac

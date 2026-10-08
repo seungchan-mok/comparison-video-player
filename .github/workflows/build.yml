@@ -54,7 +54,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: scvp-linux
-          path: dist/scvp-*-linux-x86_64.tar.gz
+          path: |
+            dist/scvp-*-linux-x86_64.tar.gz
+            dist/scvp-*-x86_64.AppImage
       - uses: actions/upload-artifact@v4
         with:
           name: smoke-clips
@@ -87,7 +89,10 @@ jobs:
           name: smoke-clips
           path: smoke-clips
       - name: Smoke test on ${{ matrix.image }}
-        run: scripts/smoke-linux-bundle.sh ${{ matrix.image }} dist/scvp-*-linux-x86_64.tar.gz smoke-clips ${{ matrix.packages }}
+        # Artifacts lose the executable bit; the script also runs the AppImage next to the tarball.
+        run: |
+          chmod +x dist/*.AppImage
+          scripts/smoke-linux-bundle.sh ${{ matrix.image }} dist/scvp-*-linux-x86_64.tar.gz smoke-clips ${{ matrix.packages }}
 
   macos:
     runs-on: macos-14

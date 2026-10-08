@@ -1,7 +1,7 @@
 # Build environment of the portable Linux bundle (scripts/package-linux.sh).
 #
 # glibc 2.28 (AlmaLinux 8, the manylinux_2_28 image) so the bundle runs on Ubuntu 20.04+,
-# Debian 10+, RHEL 8+ and Fedora; gcc-toolset links the C++ runtime parts newer than the system's
+# Debian 12+, RHEL 8+ and Fedora; gcc-toolset links the C++ runtime parts newer than the system's
 # statically, so binaries need no libstdc++ newer than GCC 8's. Qt is the official 6.8 LTS build
 # (made for glibc 2.28, ships its own ICU). FFmpeg is built here, LGPL, with every native decoder,
 # encoder and (de)muxer plus:
@@ -11,6 +11,7 @@
 #   VA-API      decoding, against the image's libva 2.13; the system libva is used when there is
 #               one. The VA-API encoders (unused by scvp) are left out: they need vaSyncBuffer,
 #               which Ubuntu 20.04's libva 2.7 lacks.
+# appimagetool and the AppImage runtime make the single-file AppImage of the same bundle.
 # Every download is pinned by checksum.
 FROM quay.io/pypa/manylinux_2_28_x86_64@sha256:39df0042d5cc900b085aa25a0659368b42a0006c54c474299b785b44c1b4ff82
 
@@ -68,6 +69,19 @@ RUN fetch https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz \
         --enable-zlib --enable-libdav1d --enable-libopenh264 --enable-vaapi \
         --enable-cuda --enable-ffnvcodec --enable-nvdec --enable-nvenc --disable-encoder='*_vaapi' \
     && make -j"$(nproc)" install \
+    && rm -rf /tmp/build/*
+
+# AppImage: appimagetool, unpacked so it runs without FUSE, and the static type2 runtime that
+# goes into the AppImage (needs no libfuse2 on the user's system).
+RUN fetch https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage \
+        ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0 \
+    && chmod +x appimagetool-x86_64.AppImage \
+    && ./appimagetool-x86_64.AppImage --appimage-extract >/dev/null \
+    && mv squashfs-root /opt/appimagetool \
+    && ln -s /opt/appimagetool/AppRun /usr/local/bin/appimagetool \
+    && fetch https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64 \
+        2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d \
+    && mv runtime-x86_64 /opt/appimagetool/runtime-x86_64 \
     && rm -rf /tmp/build/*
 
 WORKDIR /src
