@@ -158,6 +158,22 @@ jobs:
       - name: Test
         # Without fixtures (the LGPL FFmpeg build has no x264/x265 encoders): unit tests only.
         run: ctest --preset dev
+      - name: Failed tests, run directly
+        # ctest shows a test that crashed or called abort() as just "Failed", without the output
+        # it had not flushed: run each failed one again for its exit code and whole output.
+        if: failure()
+        run: |
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          foreach ($line in Get-Content build/dev/Testing/Temporary/LastTestsFailed.log -ErrorAction SilentlyContinue) {
+            $name = ($line -split ':', 2)[1]
+            $exe, $fn = $name -split '\.', 2
+            $path = Get-ChildItem build/dev -Recurse -Filter "$exe.exe" | Select-Object -First 1
+            if (-not $path) { continue }
+            $testArgs = @('-v1') + @($fn | Where-Object { $_ })
+            Write-Host "== $name"
+            & $path.FullName @testArgs 2>&1 | Out-Host
+            Write-Host ('exit code 0x{0:X8}' -f $LASTEXITCODE)
+          }
       - name: Package
         run: |
           cmake --preset release -DFFMPEG_ROOT="${{ env.FFMPEG_ROOT }}"
