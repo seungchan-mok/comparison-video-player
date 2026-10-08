@@ -3,7 +3,8 @@
 #     or is part of Windows. The VC++ runtime is not part of Windows even though build machines
 #     have it in System32, so it must be shipped.
 #  2. with -Clip, scvp.exe opens the clip and saves a frame, with PATH reduced to Windows itself
-#     (so no Qt or FFmpeg DLL can come from the build machine).
+#     (so no Qt or FFmpeg DLL can come from the build machine), and the colours in that frame
+#     tell whether the video was drawn (software OpenGL on runners without a GPU).
 #
 #   scripts/check-windows-bundle.ps1 -Dir <package folder> [-Clip <video>]
 # Needs dumpbin (a Visual Studio developer shell).
@@ -59,8 +60,10 @@ if ($Clip) {
         Remove-Item Env:QT_PLUGIN_PATH, Env:QML2_IMPORT_PATH, Env:QT_ROOT_DIR -ErrorAction SilentlyContinue
         $env:APPDATA = Join-Path $out 'appdata'
         $env:LOCALAPPDATA = Join-Path $out 'localappdata'
-        # Runners have no GPU driver: Qt's bundled software OpenGL (opengl32sw.dll).
+        # Runners have no GPU driver: Qt's bundled software OpenGL (opengl32sw.dll). Qt's
+        # warnings go to stderr, not to a debugger nobody attaches.
         $env:QT_OPENGL = 'software'
+        $env:QT_FORCE_STDERR_LOGGING = '1'
         $p = Start-Process -FilePath (Join-Path $bin 'scvp.exe') -PassThru -NoNewWindow `
             -ArgumentList @("`"$Clip`"", '--debug-size', '700x600', '--debug-grab', "`"$png`"") `
             -RedirectStandardError (Join-Path $out 'stderr.txt') -RedirectStandardOutput (Join-Path $out 'stdout.txt')
@@ -69,10 +72,19 @@ if ($Clip) {
         $code = $p.ExitCode
     } finally {
         foreach ($v in $saved.Keys) { [Environment]::SetEnvironmentVariable($v, $saved[$v]) }
-        Remove-Item Env:QT_OPENGL -ErrorAction SilentlyContinue
+        Remove-Item Env:QT_OPENGL, Env:QT_FORCE_STDERR_LOGGING -ErrorAction SilentlyContinue
     }
     Get-Content (Join-Path $out 'stdout.txt'), (Join-Path $out 'stderr.txt') -ErrorAction SilentlyContinue | Write-Host
     if ($code -ne 0) { throw "scvp.exe exited with $code" }
-    if (-not (Test-Path $png) -or (Get-Item $png).Length -lt 1000) { throw 'scvp.exe saved no frame' }
-    Write-Host "run: scvp.exe opened $(Split-Path $Clip -Leaf) and saved a frame ($((Get-Item $png).Length) bytes)"
+    if (-not (Test-Path $png)) { throw 'scvp.exe saved no frame' }
+    # A drawn test picture has many colours; an empty view has one or two.
+    Add-Type -AssemblyName System.Drawing
+    $bmp = [System.Drawing.Bitmap]::new($png)
+    $colours = @{}
+    for ($y = 0; $y -lt $bmp.Height; $y += 4) {
+        for ($x = 0; $x -lt $bmp.Width; $x += 4) { $colours[$bmp.GetPixel($x, $y).ToArgb()] = $true }
+    }
+    $bmp.Dispose()
+    Write-Host "run: scvp.exe opened $(Split-Path $Clip -Leaf) and saved a frame ($($colours.Count) colours)"
+    if ($colours.Count -lt 16) { Write-Warning 'the saved view looks empty: the video was decoded but not drawn' }
 }
