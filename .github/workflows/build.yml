@@ -182,13 +182,22 @@ jobs:
           cmake --build --preset release
           cd build/release
           cpack
+      - name: OpenGL for the checks
+        # Runners have no GPU driver that does OpenGL 3.3: Mesa's llvmpipe stands in for one in
+        # the checks' runs (not shipped).
+        run: |
+          curl.exe -fsSL -o mesa.7z https://github.com/pal1000/mesa-dist-win/releases/download/26.2.4/mesa3d-26.2.4-release-msvc.7z
+          if ((Get-FileHash mesa.7z -Algorithm SHA256).Hash -ne '351fc8c8b695878ffb3eaa044b3ead08672a48b1a045e3c3e3975811df0f6695') { throw 'mesa.7z checksum mismatch' }
+          7z e mesa.7z -omesa -y "x64\opengl32.dll" "x64\libgallium_wgl.dll" | Out-Null
+          if (-not (Test-Path mesa/opengl32.dll)) { throw "no opengl32.dll in mesa.7z" }
+          Get-ChildItem mesa
       - name: Check package
         # The zip must run on a clean PC: every import shipped (FFmpeg's own DLLs, the VC++
-        # runtime), and the program opens a video with nothing but Windows on PATH.
+        # runtime), and the program shows a video with nothing but Windows on PATH.
         run: |
           ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=320x240:rate=25 -frames:v 25 -c:v mpeg4 -q:v 2 clip.mp4
           Expand-Archive (Get-Item build/release/scvp-*.zip).FullName -DestinationPath unpacked
-          scripts/check-windows-bundle.ps1 -Dir (Get-ChildItem unpacked -Directory)[0].FullName -Clip clip.mp4
+          scripts/check-windows-bundle.ps1 -Dir (Get-ChildItem unpacked -Directory)[0].FullName -Clip clip.mp4 -GlDriver mesa
       - name: Installer
         # Per-user setup.exe (NSIS) with the zip's files and the icon drawn by scvp itself.
         run: |
@@ -209,7 +218,7 @@ jobs:
           $setup = (Get-Item build/release/scvp-*-setup.exe).FullName
           Start-Process $setup -ArgumentList '/S' -Wait
           $dir = "$env:LOCALAPPDATA\Programs\SCVP"
-          scripts/check-windows-bundle.ps1 -Dir $dir -Clip clip.mp4
+          scripts/check-windows-bundle.ps1 -Dir $dir -Clip clip.mp4 -GlDriver mesa
           $keys = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\SCVP',
                   'HKCU:\Software\Classes\SCVP.video\shell\open\command',
                   'HKCU:\Software\Classes\.mp4\OpenWithProgids',

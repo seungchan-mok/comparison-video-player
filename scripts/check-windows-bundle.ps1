@@ -3,14 +3,17 @@
 #     or is part of Windows. The VC++ runtime is not part of Windows even though build machines
 #     have it in System32, so it must be shipped.
 #  2. with -Clip, scvp.exe opens the clip and saves a frame, with PATH reduced to Windows itself
-#     (so no Qt or FFmpeg DLL can come from the build machine), and the colours in that frame
-#     tell whether the video was drawn (software OpenGL on runners without a GPU).
+#     (so no Qt or FFmpeg DLL can come from the build machine). With -GlDriver, a folder with an
+#     OpenGL driver standing in for a GPU's (Mesa llvmpipe's opengl32.dll on runners, which have
+#     none that does OpenGL 3.3), the frame must also show the video, not an empty view. The
+#     driver's DLLs sit next to scvp.exe only for that run.
 #
-#   scripts/check-windows-bundle.ps1 -Dir <package folder> [-Clip <video>]
+#   scripts/check-windows-bundle.ps1 -Dir <package folder> [-Clip <video> [-GlDriver <folder>]]
 # Needs dumpbin (a Visual Studio developer shell).
 param(
     [Parameter(Mandatory = $true)] [string] $Dir,
-    [string] $Clip
+    [string] $Clip,
+    [string] $GlDriver
 )
 $ErrorActionPreference = 'Stop'
 $Dir = (Resolve-Path $Dir).Path
@@ -55,14 +58,23 @@ if ($Clip) {
     foreach ($v in 'PATH', 'QT_PLUGIN_PATH', 'QML2_IMPORT_PATH', 'QT_ROOT_DIR', 'APPDATA', 'LOCALAPPDATA') {
         $saved[$v] = [Environment]::GetEnvironmentVariable($v)
     }
+    $added = @()
     try {
+        if ($GlDriver) {
+            # Found before System32's opengl32.dll: the application folder comes first.
+            foreach ($dll in Get-ChildItem $GlDriver -Filter *.dll) {
+                $dest = Join-Path $bin $dll.Name
+                if (Test-Path $dest) { throw "$($dll.Name) is already in the package" }
+                Copy-Item $dll.FullName $dest
+                $added += $dest
+            }
+            $env:GALLIUM_DRIVER = 'llvmpipe'
+        }
         $env:PATH = "$system;$env:WINDIR;$system\Wbem"
         Remove-Item Env:QT_PLUGIN_PATH, Env:QML2_IMPORT_PATH, Env:QT_ROOT_DIR -ErrorAction SilentlyContinue
         $env:APPDATA = Join-Path $out 'appdata'
         $env:LOCALAPPDATA = Join-Path $out 'localappdata'
-        # Runners have no GPU driver: Qt's bundled software OpenGL (opengl32sw.dll). Qt's
-        # warnings go to stderr, not to a debugger nobody attaches.
-        $env:QT_OPENGL = 'software'
+        # Qt's warnings go to stderr, not to a debugger nobody attaches.
         $env:QT_FORCE_STDERR_LOGGING = '1'
         $p = Start-Process -FilePath (Join-Path $bin 'scvp.exe') -PassThru -NoNewWindow `
             -ArgumentList @("`"$Clip`"", '--debug-size', '700x600', '--debug-grab', "`"$png`"") `
@@ -72,7 +84,8 @@ if ($Clip) {
         $code = $p.ExitCode
     } finally {
         foreach ($v in $saved.Keys) { [Environment]::SetEnvironmentVariable($v, $saved[$v]) }
-        Remove-Item Env:QT_OPENGL, Env:QT_FORCE_STDERR_LOGGING -ErrorAction SilentlyContinue
+        Remove-Item Env:GALLIUM_DRIVER, Env:QT_FORCE_STDERR_LOGGING -ErrorAction SilentlyContinue
+        $added | ForEach-Object { Remove-Item $_ -ErrorAction SilentlyContinue }
     }
     Get-Content (Join-Path $out 'stdout.txt'), (Join-Path $out 'stderr.txt') -ErrorAction SilentlyContinue | Write-Host
     if ($code -ne 0) { throw "scvp.exe exited with $code" }
@@ -86,5 +99,8 @@ if ($Clip) {
     }
     $bmp.Dispose()
     Write-Host "run: scvp.exe opened $(Split-Path $Clip -Leaf) and saved a frame ($($colours.Count) colours)"
-    if ($colours.Count -lt 16) { Write-Warning 'the saved view looks empty: the video was decoded but not drawn' }
+    if ($colours.Count -lt 16) {
+        if ($GlDriver) { throw 'the saved view is empty: the video was not drawn' }
+        Write-Warning 'the saved view is empty: no OpenGL 3.3 here (-GlDriver gives one), the video was only decoded'
+    }
 }
