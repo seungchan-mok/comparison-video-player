@@ -51,12 +51,26 @@ void setApplicationNames()
     QCoreApplication::setApplicationVersion(QStringLiteral(SCVP_VERSION));
 }
 
+#if defined(Q_OS_WIN)
+// As QCommandLineParser decides it: a message box only for a GUI program that has no console and
+// whose output is not redirected either. A script or ctest reads the output through pipes, and
+// a modal box nobody can see would wait forever.
+bool reportInMessageBox()
+{
+    if (GetConsoleWindow())
+        return false;
+    STARTUPINFOW startup;
+    GetStartupInfoW(&startup);
+    return !(startup.dwFlags & STARTF_USESTDHANDLES);
+}
+#endif
+
 // Help, version and argument errors go to stdout / stderr, or to a message box where there is
-// no console to print to (a GUI program on Windows), as QCommandLineParser does it.
+// no console to print to (a GUI program on Windows started from Explorer).
 void report(const QString& text, bool error)
 {
 #if defined(Q_OS_WIN)
-    if (!GetConsoleWindow()) {
+    if (reportInMessageBox()) {
         QMessageBox box(error ? QMessageBox::Warning : QMessageBox::Information, QStringLiteral("SCVP"),
                         QStringLiteral("<pre>%1</pre>").arg(text.toHtmlEscaped()));
         box.exec();
