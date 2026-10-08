@@ -139,7 +139,8 @@ private slots:
         o.scale = 50;
         o.labels = false;
         o.frameInfo = true;
-        o.path = QStringLiteral("/tmp/exports/x.mkv");
+        // A real absolute path: "/tmp/..." gains the current drive on Windows.
+        o.path = m_dir.filePath(QStringLiteral("exports/x.mkv"));
         o.save();
         const ExportOptions l = ExportOptions::load();
         QCOMPARE(int(l.format), int(OutputFormat::Ffv1));
@@ -149,7 +150,7 @@ private slots:
         QCOMPARE(l.scale, 50);
         QVERIFY(!l.labels);
         QVERIFY(l.frameInfo);
-        QCOMPARE(l.lastDir(), QStringLiteral("/tmp/exports"));
+        QCOMPARE(l.lastDir(), m_dir.filePath(QStringLiteral("exports")));
     }
 };
 
