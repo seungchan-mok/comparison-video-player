@@ -169,10 +169,12 @@ jobs:
             $exe, $fn = $name -split '\.', 2
             $path = Get-ChildItem build/dev -Recurse -Filter "$exe.exe" | Select-Object -First 1
             if (-not $path) { continue }
-            $testArgs = @('-v1') + @($fn | Where-Object { $_ })
+            $log = Join-Path $env:RUNNER_TEMP "$name.txt"
+            $testArgs = @($fn | Where-Object { $_ }) + @('-o', "$log,txt", '-o', '-,txt')
             Write-Host "== $name"
             & $path.FullName @testArgs 2>&1 | Out-Host
             Write-Host ('exit code 0x{0:X8}' -f $LASTEXITCODE)
+            Get-Content $log -ErrorAction SilentlyContinue | Out-Host
           }
       - name: Package
         run: |
