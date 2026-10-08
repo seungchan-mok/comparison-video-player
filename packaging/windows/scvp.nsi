@@ -31,7 +31,7 @@ VIAddVersionKey /LANG=0 "ProductName" "${APP}"
 VIAddVersionKey /LANG=0 "FileDescription" "${APP} installer"
 VIAddVersionKey /LANG=0 "ProductVersion" "${VERSION}"
 VIAddVersionKey /LANG=0 "FileVersion" "${VERSION}"
-VIAddVersionKey /LANG=0 "LegalCopyright" "SCVP contributors"
+VIAddVersionKey /LANG=0 "LegalCopyright" "Copyright (c) 2026 Seungchan Mok (MIT License)"
 
 !include "MUI2.nsh"
 !define MUI_ICON "${SRC}\scvp.ico"
