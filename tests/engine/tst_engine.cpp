@@ -315,6 +315,30 @@ private slots:
             QVERIFY(!o.engine.isOpen(0));
         }
     }
+
+    // An export decodes the slot's video on its own: with the index already scanned, and on
+    // after the slot was closed.
+    void sourceOutlivesTheSlot()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        OpenedEngine o;
+        QVERIFY(openFixture(o, 0, QStringLiteral("h264_b")));
+        QVERIFY(!o.engine.source(1));
+        std::shared_ptr<IVideoSource> src = o.engine.source(0);
+        QVERIFY(src && src->indexComplete());
+        QCOMPARE(src->index()->frameCount(), o.frames);
+        o.engine.close(0);
+        QVERIFY(!o.engine.source(0));
+        std::string err;
+        auto session = src->openSession(SessionConfig{std::make_shared<FramePool>("export"), 0, HwConfig{HwPolicy::Off}}, &err);
+        QVERIFY2(session, err.c_str());
+        QCOMPARE(session->seekTo(src->index()->seekPointFor(100)), DecodeStatus::Ok);
+        FramePtr f;
+        do {
+            QCOMPARE(session->next(f, DecodeHints{}), DecodeStatus::Ok);
+        } while (f->pres < 100);
+        QCOMPARE(test::frameMd5(f->av), o.ref[100]);
+    }
 };
 
 QTEST_GUILESS_MAIN(TstEngine)

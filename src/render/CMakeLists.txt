@@ -6,6 +6,7 @@ add_library(scvp_render STATIC
     PixelLayout.h PixelLayout.cpp
     CompareLayout.h CompareLayout.cpp
     DigitAtlas.h DigitAtlas.cpp
+    OffscreenView.h OffscreenView.cpp
     PixelOverlay.h PixelOverlay.cpp
     PixelReadback.h PixelReadback.cpp
     Renderer.h Renderer.cpp
@@ -25,4 +26,6 @@ qt_add_resources(scvp_render "scvp_shaders"
         shaders/fullscreen.vert
         shaders/convert.frag
         shaders/display.frag
+        shaders/overlay.frag
+        shaders/rgb2yuv.frag
 )

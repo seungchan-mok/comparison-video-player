@@ -23,6 +23,7 @@ add_library(scvp_engine STATIC
     TimelineMapper.h TimelineMapper.cpp
     RawVideoSource.h RawVideoSource.cpp
     ImageSequenceSource.h ImageSequenceSource.cpp
+    VideoEncoder.h VideoEncoder.cpp
     VideoSource.h
 )
 add_library(scvp::engine ALIAS scvp_engine)

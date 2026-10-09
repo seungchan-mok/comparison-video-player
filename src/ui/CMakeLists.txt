@@ -1,9 +1,13 @@
 add_library(scvp_ui STATIC
     AppIcon.h AppIcon.cpp
     ClipboardImage.h ClipboardImage.cpp
+    CommandLine.h CommandLine.cpp
     ControlBar.h ControlBar.cpp
     DesktopIntegration.h DesktopIntegration.cpp
     EngineBridge.h EngineBridge.cpp
+    ExportDialog.h ExportDialog.cpp
+    ExportJob.h ExportJob.cpp
+    ExportProgress.h ExportProgress.cpp
     FramePacer.h FramePacer.cpp
     HudOverlay.h HudOverlay.cpp
     KeyMap.h KeyMap.cpp
@@ -11,6 +15,7 @@ add_library(scvp_ui STATIC
     LegendDialog.h LegendDialog.cpp
     MainWindow.h MainWindow.cpp
     OpenRawDialog.h OpenRawDialog.cpp
+    OverlayPainter.h OverlayPainter.cpp
     PixelInspector.h PixelInspector.cpp
     Player.h Player.cpp
     Settings.h Settings.cpp

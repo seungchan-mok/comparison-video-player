@@ -1,10 +1,13 @@
 #include "ui/AppIcon.h"
 
+#include <QBuffer>
+#include <QDataStream>
 #include <QDir>
 #include <QLinearGradient>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
+#include <QSaveFile>
 
 #include <algorithm>
 
@@ -12,6 +15,7 @@ namespace scvp::ui {
 namespace {
 
 constexpr int kSizes[] = {16, 22, 24, 32, 48, 64, 128, 256, 512};
+constexpr int kIcoSizes[] = {16, 24, 32, 48, 64, 128, 256};  // an ICO entry stops at 256
 
 } // namespace
 
@@ -94,6 +98,40 @@ bool exportAppIcons(const QString& hicolorDir)
         ok &= renderAppIcon(n).save(dir + QStringLiteral("/scvp.png"), "PNG");
     }
     return ok;
+}
+
+QByteArray appIconIco()
+{
+    QList<QByteArray> pngs;
+    for (int n : kIcoSizes) {
+        QByteArray png;
+        QBuffer buf(&png);
+        buf.open(QIODevice::WriteOnly);
+        if (!renderAppIcon(n).save(&buf, "PNG"))
+            return {};
+        pngs.append(png);
+    }
+    // ICONDIR, then one ICONDIRENTRY per picture (0 stands for 256 px), then the pictures.
+    QByteArray ico;
+    QDataStream out(&ico, QIODevice::WriteOnly);
+    out.setByteOrder(QDataStream::LittleEndian);
+    out << quint16(0) << quint16(1) << quint16(pngs.size());
+    quint32 offset = 6 + 16 * quint32(pngs.size());
+    for (qsizetype i = 0; i < pngs.size(); ++i) {
+        const quint8 side = kIcoSizes[i] >= 256 ? 0 : quint8(kIcoSizes[i]);
+        out << side << side << quint8(0) << quint8(0) << quint16(1) << quint16(32) << quint32(pngs[i].size()) << offset;
+        offset += quint32(pngs[i].size());
+    }
+    for (const QByteArray& png : pngs)
+        out.writeRawData(png.constData(), int(png.size()));
+    return ico;
+}
+
+bool exportAppIco(const QString& path)
+{
+    const QByteArray ico = appIconIco();
+    QSaveFile f(path);
+    return !ico.isEmpty() && f.open(QIODevice::WriteOnly) && f.write(ico) == ico.size() && f.commit();
 }
 
 } // namespace scvp::ui

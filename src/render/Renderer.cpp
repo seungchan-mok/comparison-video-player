@@ -330,19 +330,25 @@ double Renderer::captureFactor(const RenderState& state, qint64 maxPixels) const
     return captureFactor(state, maxSide, maxPixels);
 }
 
-QImage Renderer::capture(const RenderState& screen, double factor)
+RenderState Renderer::captureState(const RenderState& screen, double factor)
 {
-    if (!m_gl || factor <= 0)
-        return {};
     RenderState s = screen;
-    const QSize size(std::max(1, int(std::lround(screen.framebufferSize.width() * factor))),
-                     std::max(1, int(std::lround(screen.framebufferSize.height() * factor))));
-    s.framebufferSize = size;
+    s.framebufferSize = QSize(std::max(1, int(std::lround(screen.framebufferSize.width() * factor))),
+                              std::max(1, int(std::lround(screen.framebufferSize.height() * factor))));
     s.view = screen.view.scaled(factor);
     // Size thresholds in logical px (digits, grid, outline, smoothing) decide as on screen.
     s.devicePixelRatio = screen.devicePixelRatio * factor;
     s.lineScale = screen.lineScale * factor;
     s.sampleProbe = false;
+    return s;
+}
+
+QImage Renderer::capture(const RenderState& screen, double factor)
+{
+    if (!m_gl || factor <= 0)
+        return {};
+    const RenderState s = captureState(screen, factor);
+    const QSize size = s.framebufferSize;
 
     GL* gl = m_gl;
     while (gl->glGetError() != GL_NO_ERROR) {

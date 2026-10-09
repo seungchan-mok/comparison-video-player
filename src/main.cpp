@@ -1,8 +1,12 @@
 #include "engine/FfmpegCompat.h"
+#include "render/ViewTransform.h"
 #include "ui/AppIcon.h"
+#include "ui/CommandLine.h"
+#include "ui/ExportDialog.h"
 #include "ui/HudOverlay.h"
 #include "ui/KeyMap.h"
 #include "ui/MainWindow.h"
+#include "ui/Settings.h"
 
 #include "ui/Player.h"
 #include "ui/VideoView.h"
@@ -12,14 +16,23 @@
 #include <QCommandLineParser>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QFileOpenEvent>
+#include <QMessageBox>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QSurfaceFormat>
 #include <QTimer>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
+
+#if defined(Q_OS_WIN)
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -29,6 +42,172 @@ QString ffmpegVersionString()
     return QStringLiteral("FFmpeg %1 (avcodec %2, avformat %3, avutil %4, swscale %5)")
         .arg(QString::fromUtf8(av_version_info()), v(avcodec_version()), v(avformat_version()), v(avutil_version()),
              v(swscale_version()));
+}
+
+void setApplicationNames()
+{
+    QCoreApplication::setApplicationName(QStringLiteral("scvp"));
+    QCoreApplication::setOrganizationName(QStringLiteral("scvp"));  // the settings (and the keys in --help) live under it
+    QCoreApplication::setApplicationVersion(QStringLiteral(SCVP_VERSION));
+}
+
+#if defined(Q_OS_WIN)
+// As QCommandLineParser decides it: a message box only for a GUI program that has no console and
+// whose output is not redirected either. A script or ctest reads the output through pipes, and
+// a modal box nobody can see would wait forever.
+bool reportInMessageBox()
+{
+    if (GetConsoleWindow())
+        return false;
+    STARTUPINFOW startup;
+    GetStartupInfoW(&startup);
+    return !(startup.dwFlags & STARTF_USESTDHANDLES);
+}
+#endif
+
+// Help, version and argument errors go to stdout / stderr, or to a message box where there is
+// no console to print to (a GUI program on Windows started from Explorer).
+void report(const QString& text, bool error)
+{
+#if defined(Q_OS_WIN)
+    if (reportInMessageBox()) {
+        QMessageBox box(error ? QMessageBox::Warning : QMessageBox::Information, QStringLiteral("SCVP"),
+                        QStringLiteral("<pre>%1</pre>").arg(text.toHtmlEscaped()));
+        box.exec();
+        return;
+    }
+#endif
+    std::FILE* out = error ? stderr : stdout;
+    std::fputs(text.toUtf8().constData(), out);
+    std::fflush(out);
+}
+
+// Deterministic end-to-end checks on a virtual display (scripts/xvfb-run.sh); not in --help.
+void addDebugOptions(QCommandLineParser& parser)
+{
+    const QCommandLineOption options[] = {
+        QCommandLineOption(QStringLiteral("debug-grab"), QStringLiteral("Save the video view to PNG, then quit."), QStringLiteral("png")),
+        QCommandLineOption(QStringLiteral("debug-after"), QStringLiteral("Milliseconds before --debug-grab (default 1000)."),
+                           QStringLiteral("ms"), QStringLiteral("1000")),
+        QCommandLineOption(QStringLiteral("debug-size"), QStringLiteral("Window size WxH."), QStringLiteral("WxH")),
+        QCommandLineOption(QStringLiteral("debug-grab-window"), QStringLiteral("Grab the whole window, not just the video.")),
+        QCommandLineOption(QStringLiteral("debug-actions"),
+                           QStringLiteral("Comma separated actions to trigger after opening (e.g. info_overlay,fullscreen)."),
+                           QStringLiteral("ids")),
+        QCommandLineOption(QStringLiteral("debug-hover"), QStringLiteral("Move the mouse over the view at X,Y (logical px)."),
+                           QStringLiteral("x,y")),
+        QCommandLineOption(QStringLiteral("debug-clipboard"), QStringLiteral("Save the PNG of each view copy (copy_view) here."),
+                           QStringLiteral("png")),
+        QCommandLineOption(QStringLiteral("debug-export"),
+                           QStringLiteral("Export the comparison to this file (.mp4 H.264, .mkv FFV1, .png sequence) once the "
+                                          "videos are shown and indexed, then quit."),
+                           QStringLiteral("path")),
+        QCommandLineOption(QStringLiteral("debug-export-opts"),
+                           QStringLiteral("Comma separated: hevc, screen, size=PERCENT, range=FIRST-LAST, encoder=NAME, "
+                                          "quality=high|medium|small, labels=0|1, info=0|1."),
+                           QStringLiteral("list")),
+    };
+    for (QCommandLineOption o : options) {
+        o.setFlags(QCommandLineOption::HiddenFromHelp);
+        parser.addOption(o);
+    }
+}
+
+enum class Info { None, Help, Version };
+
+// --help or --version (help wins), told apart from option values as the real parse does. Runs
+// before any QApplication exists: asking for them must not need a display.
+Info requestedInfo(int argc, char* argv[])
+{
+    QStringList args;
+    for (int i = 0; i < argc; ++i)
+        args << QString::fromLocal8Bit(argv[i]);
+    QCommandLineParser parser;
+    scvp::ui::addLaunchOptions(parser);
+    addDebugOptions(parser);
+    parser.parse(args);  // errors are reported by the real parse
+    return parser.isSet(QStringLiteral("help")) ? Info::Help : parser.isSet(QStringLiteral("version")) ? Info::Version : Info::None;
+}
+
+int printInfo(int argc, char* argv[], Info info)
+{
+#if defined(Q_OS_WIN)
+    QApplication app(argc, argv);  // the text goes to a message box
+#else
+    QCoreApplication app(argc, argv);  // no display: a headless shell or a script can ask
+#endif
+    setApplicationNames();
+    if (info == Info::Help)
+        report(scvp::ui::launchHelp(scvp::ui::AppSettings::load().keys), false);
+    else
+        report(QStringLiteral("scvp %1\nQt %2\n%3\n").arg(QStringLiteral(SCVP_VERSION), QLatin1String(qVersion()), ffmpegVersionString()),
+               false);
+    return 0;
+}
+
+// --debug-export: what to export, from the file's extension and the option list.
+scvp::ui::ExportOptions debugExportOptions(const QString& path, const QString& list)
+{
+    using namespace scvp;
+    ui::ExportOptions o;
+    o.path = path;
+    const QString ext = QFileInfo(path).suffix().toLower();
+    o.format = ext == QLatin1String("mkv") ? OutputFormat::Ffv1 : ext == QLatin1String("png") ? OutputFormat::PngSequence : OutputFormat::H264;
+    for (const QString& item : list.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+        const QString key = item.section(QLatin1Char('='), 0, 0).trimmed();
+        const QString value = item.section(QLatin1Char('='), 1).trimmed();
+        if (key == QLatin1String("hevc"))
+            o.format = OutputFormat::Hevc;
+        else if (key == QLatin1String("screen"))
+            o.picture = ui::ExportPicture::Screen;
+        else if (key == QLatin1String("size"))
+            o.scale = value.toInt();
+        else if (key == QLatin1String("range")) {
+            o.first = value.section(QLatin1Char('-'), 0, 0).toLongLong();
+            o.last = value.section(QLatin1Char('-'), 1, 1).toLongLong();
+        } else if (key == QLatin1String("encoder"))
+            o.encoder = value;
+        else if (key == QLatin1String("quality"))
+            o.quality = value == QLatin1String("small") ? OutputQuality::Small : value == QLatin1String("medium") ? OutputQuality::Medium : OutputQuality::High;
+        else if (key == QLatin1String("labels"))
+            o.labels = value != QLatin1String("0");
+        else if (key == QLatin1String("info"))
+            o.frameInfo = value != QLatin1String("0");
+    }
+    return o;
+}
+
+// The view state the command line can set, for the end-to-end checks.
+QString debugState(scvp::ui::MainWindow& w)
+{
+    using namespace scvp;
+    const render::CompareSettings& c = w.view()->compare();
+    const char* modes[] = {"split", "wipe", "flip", "diff"};
+    const render::ViewTransform& t = w.view()->transform();
+    const QSizeF pane = t.viewportSize();
+    const QPointF mid = t.deviceToImage(QPointF(std::floor(pane.width() / 2), std::floor(pane.height() / 2)));
+    auto matrix = [](std::optional<AVColorSpace> m) {
+        return !m ? "auto" : *m == AVCOL_SPC_BT470BG ? "601" : *m == AVCOL_SPC_BT709 ? "709" : *m == AVCOL_SPC_BT2020_NCL ? "2020" : "other";
+    };
+    auto range = [](std::optional<AVColorRange> r) { return !r ? "auto" : *r == AVCOL_RANGE_MPEG ? "limited" : "full"; };
+    const render::ColorOverrides& a = w.view()->colorOverrides(0);
+    const render::ColorOverrides& b = w.view()->colorOverrides(1);
+    PlaybackController& pc = w.player()->controller();
+    QStringList s;
+    s << QStringLiteral("view=%1").arg(QLatin1String(modes[int(c.mode)])) << QStringLiteral("wipe=%1").arg(c.wipe)
+      << QStringLiteral("gain=%1").arg(c.diffGain) << QStringLiteral("zoom=%1").arg(t.isFit() ? QStringLiteral("fit") : QString::number(t.scale()))
+      << QStringLiteral("center=%1,%2").arg(int(std::floor(mid.x()))).arg(int(std::floor(mid.y())))
+      << QStringLiteral("pixel=%1").arg(w.view()->overlay().mode == render::ValueMode::Codes ? QStringLiteral("codes") : QStringLiteral("rgb"))
+      << QStringLiteral("legend=%1").arg(w.hud()->legendVisible() ? QStringLiteral("on") : QStringLiteral("off"))
+      << QStringLiteral("info=%1").arg(w.hud()->infoVisible() ? QStringLiteral("on") : QStringLiteral("off"))
+      << QStringLiteral("fullscreen=%1").arg(w.isFullScreen() ? QStringLiteral("on") : QStringLiteral("off"))
+      << QStringLiteral("speed=%1").arg(pc.speed())
+      << QStringLiteral("loop=%1").arg(pc.hasLoop() ? QStringLiteral("%1-%2%3").arg(pc.loopFirst()).arg(pc.loopLast()).arg(pc.loopActive() ? QString() : QStringLiteral("(off)"))
+                                                    : QStringLiteral("none"))
+      << QStringLiteral("offset=%1").arg(pc.offset())
+      << QStringLiteral("matrix=%1,%2").arg(QLatin1String(matrix(a.matrix)), QLatin1String(matrix(b.matrix)))
+      << QStringLiteral("range=%1,%2").arg(QLatin1String(range(a.range)), QLatin1String(range(b.range)));
+    return s.join(QLatin1Char(' '));
 }
 
 void setDefaultSurfaceFormat()
@@ -85,136 +264,53 @@ private:
 
 int main(int argc, char* argv[])
 {
-    // Packaging: write the launcher icons and exit (no display needed).
+    // Packaging: write the launcher icons (hicolor PNGs, or the Windows .ico) and exit (no
+    // display needed).
     if (argc == 3 && std::strcmp(argv[1], "--export-icons") == 0)
         return scvp::ui::exportAppIcons(QString::fromLocal8Bit(argv[2])) ? 0 : 1;
+    if (argc == 3 && std::strcmp(argv[1], "--export-ico") == 0)
+        return scvp::ui::exportAppIco(QString::fromLocal8Bit(argv[2])) ? 0 : 1;
+    if (const Info info = requestedInfo(argc, argv); info != Info::None)
+        return printInfo(argc, argv, info);
 
+    QElapsedTimer started;
+    started.start();
     setDefaultSurfaceFormat();
     QApplication app(argc, argv);
-    QApplication::setApplicationName(QStringLiteral("scvp"));
+    setApplicationNames();
     QApplication::setApplicationDisplayName(QStringLiteral("SCVP"));
     // Matches the installed scvp.desktop: dock icon and window grouping, Wayland app id.
     QGuiApplication::setDesktopFileName(QStringLiteral("scvp"));
     QApplication::setWindowIcon(scvp::ui::appIcon());
-    QApplication::setOrganizationName(QStringLiteral("scvp"));
-    QApplication::setApplicationVersion(QStringLiteral(SCVP_VERSION));
     scvp::ff::installLogCallback(AV_LOG_ERROR);
 
+    // Qt has taken its own options (-platform, ...) out of the arguments by now.
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("Simple comparison video player"));
-    parser.addHelpOption();
-    parser.addVersionOption();
-    parser.addPositionalArgument(QStringLiteral("A"), QStringLiteral("Video to open (slot A)"), QStringLiteral("[A]"));
-    parser.addPositionalArgument(QStringLiteral("B"), QStringLiteral("Video to compare with A (slot B)"), QStringLiteral("[B]"));
-    QCommandLineOption offset(QStringLiteral("offset"), QStringLiteral("B shows frame A + N."), QStringLiteral("N"));
-    parser.addOption(offset);
-    QCommandLineOption sync(QStringLiteral("sync"), QStringLiteral("Pair frames by number (frame, default) or by time (time)."), QStringLiteral("mode"));
-    parser.addOption(sync);
-    QCommandLineOption raw(QStringLiteral("raw"), QStringLiteral("Open the files as raw video: WxH:pix_fmt[:fps[:header bytes]]."), QStringLiteral("spec"));
-    parser.addOption(raw);
-    QCommandLineOption view(QStringLiteral("view"), QStringLiteral("Comparison: split, sbs, tb, wipe, flip, diff."), QStringLiteral("mode"));
-    parser.addOption(view);
-    QCommandLineOption cacheMb(QStringLiteral("cache-mb"), QStringLiteral("Decoded frame cache budget for this run (MB)."), QStringLiteral("MB"));
-    parser.addOption(cacheMb);
-    QCommandLineOption vramMb(QStringLiteral("vram-mb"), QStringLiteral("GPU frame cache for this run (MB, 0 disables)."), QStringLiteral("MB"));
-    parser.addOption(vramMb);
-    QCommandLineOption hwdec(QStringLiteral("hwdec"), QStringLiteral("Decoding for this run: gpu (default), cpu, or a device (cuda, vaapi, d3d11va, videotoolbox)."), QStringLiteral("mode"));
-    parser.addOption(hwdec);
-    QCommandLineOption legendA(QStringLiteral("legend-a"), QStringLiteral("Name A in the legend instead of its file name (shows the legend)."), QStringLiteral("text"));
-    parser.addOption(legendA);
-    QCommandLineOption legendB(QStringLiteral("legend-b"), QStringLiteral("Name B in the legend instead of its file name (shows the legend)."), QStringLiteral("text"));
-    parser.addOption(legendB);
-    // Deterministic end-to-end checks on a virtual display (scripts/xvfb-run.sh).
-    QCommandLineOption debugGrab(QStringLiteral("debug-grab"), QStringLiteral("Save the video view to PNG, then quit."), QStringLiteral("png"));
-    QCommandLineOption debugAfter(QStringLiteral("debug-after"), QStringLiteral("Milliseconds before --debug-grab (default 1000)."), QStringLiteral("ms"), QStringLiteral("1000"));
-    QCommandLineOption debugSeek(QStringLiteral("debug-seek"), QStringLiteral("Seek to this frame after opening."), QStringLiteral("frame"));
-    QCommandLineOption debugPlay(QStringLiteral("debug-play"), QStringLiteral("Start playback after opening."));
-    QCommandLineOption debugSize(QStringLiteral("debug-size"), QStringLiteral("Window size WxH."), QStringLiteral("WxH"));
-    QCommandLineOption debugGrabWindow(QStringLiteral("debug-grab-window"), QStringLiteral("Grab the whole window, not just the video."));
-    QCommandLineOption debugActions(QStringLiteral("debug-actions"), QStringLiteral("Comma separated actions to trigger after opening (e.g. info_overlay,fullscreen)."), QStringLiteral("ids"));
-    QCommandLineOption debugHover(QStringLiteral("debug-hover"), QStringLiteral("Move the mouse over the view at X,Y (logical px)."), QStringLiteral("x,y"));
-    QCommandLineOption debugClipboard(QStringLiteral("debug-clipboard"), QStringLiteral("Save the PNG of each view copy (copy_view) here."), QStringLiteral("png"));
-    for (const auto& o : {debugGrab, debugAfter, debugSeek, debugPlay, debugSize, debugGrabWindow, debugActions, debugHover, debugClipboard}) {
-        QCommandLineOption hidden = o;
-        hidden.setFlags(QCommandLineOption::HiddenFromHelp);
-        parser.addOption(hidden);
+    scvp::ui::addLaunchOptions(parser);
+    addDebugOptions(parser);
+    scvp::ui::LaunchOptions launch;
+    QString error;
+    if (!parser.parse(QCoreApplication::arguments()))
+        error = parser.errorText();
+    else
+        scvp::ui::readLaunchOptions(parser, &launch, &error);
+    if (!error.isEmpty()) {
+        report(QStringLiteral("scvp: %1\nRun 'scvp --help' for the options.\n").arg(error), true);
+        return 2;
     }
-    parser.process(app);
 
     std::fprintf(stderr, "scvp %s, Qt %s, %s\n", SCVP_VERSION, qVersion(), qPrintable(ffmpegVersionString()));
 
     scvp::ui::MainWindow window;
     FileOpenFilter fileOpen(window);
     app.installEventFilter(&fileOpen);
-    if (parser.isSet(cacheMb))
-        window.overrideCacheBudget(size_t(parser.value(cacheMb).toULongLong()) << 20);
-    if (parser.isSet(vramMb))
-        window.overrideGpuBudget(size_t(parser.value(vramMb).toULongLong()) << 20);
-    if (parser.isSet(hwdec)) {
-        bool ok = false;
-        const scvp::HwConfig hw = scvp::ui::AppSettings::parseHwdec(parser.value(hwdec), &ok);
-        if (!ok)
-            std::fprintf(stderr, "unknown --hwdec value '%s', using gpu\n", qPrintable(parser.value(hwdec)));
-        window.overrideHardware(hw);
-    }
-    if (parser.isSet(debugSize)) {
-        const QStringList wh = parser.value(debugSize).split(QLatin1Char('x'));
+    if (parser.isSet(QStringLiteral("debug-size"))) {
+        const QStringList wh = parser.value(QStringLiteral("debug-size")).split(QLatin1Char('x'));
         if (wh.size() == 2)
             window.resize(wh[0].toInt(), wh[1].toInt());
     }
-    window.show();
-    if (parser.isSet(raw)) {
-        const QStringList parts = parser.value(raw).split(QLatin1Char(':'));
-        const QStringList wh = parts.value(0).split(QLatin1Char('x'));
-        scvp::RawVideoParams p;
-        p.width = wh.value(0).toInt();
-        p.height = wh.value(1).toInt();
-        p.format = av_get_pix_fmt(parts.value(1).toLatin1().constData());
-        p.frameRate = parts.value(2).toDouble();
-        p.headerBytes = parts.value(3).toLongLong();
-        if (!p.valid()) {
-            std::fprintf(stderr, "--raw expects WxH:pix_fmt[:fps[:header]], e.g. 1920x1080:nv12:30\n");
-            return 2;
-        }
-        window.setRawOverride(p);
-    }
-    const QStringList files = parser.positionalArguments();
-    if (files.size() >= 2)
-        window.openFile(1, files[1]);
-    if (parser.isSet(sync))
-        window.player()->setSyncMode(parser.value(sync) == QLatin1String("time") ? scvp::SyncMode::Timestamp : scvp::SyncMode::Frame);
-    if (parser.isSet(offset))
-        window.player()->setOffset(parser.value(offset).toLongLong());
-    if (parser.isSet(view)) {
-        scvp::render::CompareSettings c;
-        const QString v = parser.value(view);
-        using scvp::render::CompareMode;
-        using scvp::render::SplitOrientation;
-        if (v == QLatin1String("sbs"))
-            c.orientation = SplitOrientation::SideBySide;
-        else if (v == QLatin1String("tb"))
-            c.orientation = SplitOrientation::TopBottom;
-        else if (v == QLatin1String("wipe"))
-            c.mode = CompareMode::Wipe;
-        else if (v == QLatin1String("flip"))
-            c.mode = CompareMode::Flip;
-        else if (v == QLatin1String("diff"))
-            c.mode = CompareMode::Difference;
-        window.setCompare(c);
-    }
-    if (!files.isEmpty() && window.openFile(0, files[0])) {
-        if (parser.isSet(debugSeek))
-            window.player()->seek(parser.value(debugSeek).toLongLong());
-        if (parser.isSet(debugPlay))
-            window.player()->togglePlay();
-    }
-    // After opening: opening a file clears the name its slot had.
-    if (parser.isSet(legendA))
-        window.setLegendText(0, parser.value(legendA).trimmed());
-    if (parser.isSet(legendB))
-        window.setLegendText(1, parser.value(legendB).trimmed());
-    if (parser.isSet(debugClipboard)) {
-        const QString out = parser.value(debugClipboard);
+    if (parser.isSet(QStringLiteral("debug-clipboard"))) {
+        const QString out = parser.value(QStringLiteral("debug-clipboard"));
         QObject::connect(&window, &scvp::ui::MainWindow::viewCopied, &window, [out](QSize size, double factor) {
             const QMimeData* data = QGuiApplication::clipboard()->mimeData();
             const QByteArray png = data ? data->data(QStringLiteral("image/png")) : QByteArray();
@@ -224,42 +320,72 @@ int main(int argc, char* argv[])
                          qPrintable(out));
         });
     }
-    if (parser.isSet(debugActions) || parser.isSet(debugHover)) {
-        const QStringList ids = parser.value(debugActions).split(QLatin1Char(','), Qt::SkipEmptyParts);
-        const bool hover = parser.isSet(debugHover);
-        const QStringList xy = parser.value(debugHover).split(QLatin1Char(','));
+    std::function<void()> viewReady;
+    if (parser.isSet(QStringLiteral("debug-actions")) || parser.isSet(QStringLiteral("debug-hover"))) {
+        const QStringList ids = parser.value(QStringLiteral("debug-actions")).split(QLatin1Char(','), Qt::SkipEmptyParts);
+        const bool hover = parser.isSet(QStringLiteral("debug-hover"));
+        const QStringList xy = parser.value(QStringLiteral("debug-hover")).split(QLatin1Char(','));
         const QPointF at(xy.value(0).toDouble(), xy.value(1).toDouble());
-        // Once the opened videos show a frame (zoom steps and copies need one), at the earliest
-        // after 200 ms, at the latest after 5 s. The hover comes first and the actions a moment
-        // later, when the pixel under the cursor has been read back, as for a user.
+        // Once the opened videos show a frame and the command line's view is set (zoom steps and
+        // copies need both), at the earliest 200 ms after start. The hover comes first and the
+        // actions a moment later, when the pixel under the cursor has been read back, as for a user.
+        viewReady = [&window, ids, hover, at, started] {
+            QTimer::singleShot(std::max<qint64>(0, 200 - started.elapsed()), &window, [&window, ids, hover, at] {
+                if (hover) {
+                    QWidget* v = window.view();
+                    QMouseEvent move(QEvent::MouseMove, at, v->mapToGlobal(at), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+                    QApplication::sendEvent(v, &move);
+                }
+                QTimer::singleShot(hover ? 300 : 0, &window, [&window, ids] {
+                    for (const QString& id : ids)
+                        for (int a = 0; a < int(scvp::ui::Action::Count); ++a)
+                            if (id == QLatin1String(scvp::ui::KeyMap::info(scvp::ui::Action(a)).id))
+                                window.handleAction(scvp::ui::Action(a), false);
+                });
+            });
+        };
+    }
+    scvp::ui::applyLaunchOptions(window, launch, viewReady);
+
+    if (parser.isSet(QStringLiteral("debug-export"))) {
+        const scvp::ui::ExportOptions o =
+            debugExportOptions(parser.value(QStringLiteral("debug-export")), parser.value(QStringLiteral("debug-export-opts")));
+        // Once every open video shows a frame (the view has its geometry) and is indexed.
         auto* wait = new QTimer(&window);
-        wait->setInterval(20);
-        QElapsedTimer since;
-        since.start();
-        QObject::connect(wait, &QTimer::timeout, &window, [&window, ids, wait, since, hover, at] {
+        wait->setInterval(50);
+        QObject::connect(wait, &QTimer::timeout, &window, [&window, wait, o] {
             scvp::ui::Player* p = window.player();
-            const bool shown = (!p->slotOpen(0) || p->shown(0).frame) && (!p->slotOpen(1) || p->shown(1).frame);
-            if ((!shown && since.elapsed() < 5000) || since.elapsed() < 200)
+            bool ready = p->slotOpen(0) || p->slotOpen(1);
+            for (int slot = 0; slot < 2; ++slot)
+                if (p->slotOpen(slot) && (!p->shown(slot).frame || !p->engine().stats(slot).indexComplete))
+                    ready = false;
+            if (!ready)
                 return;
             wait->stop();
-            if (hover) {
-                QWidget* v = window.view();
-                QMouseEvent move(QEvent::MouseMove, at, v->mapToGlobal(at), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
-                QApplication::sendEvent(v, &move);
+            QString err;
+            if (!window.startExport(o, &err)) {
+                std::fprintf(stderr, "debug-export: FAILED to start: %s\n", qPrintable(err));
+                QApplication::exit(1);
             }
-            QTimer::singleShot(hover ? 300 : 0, &window, [&window, ids] {
-                for (const QString& id : ids)
-                    for (int a = 0; a < int(scvp::ui::Action::Count); ++a)
-                        if (id == QLatin1String(scvp::ui::KeyMap::info(scvp::ui::Action(a)).id))
-                            window.handleAction(scvp::ui::Action(a), false);
-            });
+        });
+        QObject::connect(&window, &scvp::ui::MainWindow::exportFinished, &window, [&window, o](bool ok, const QString& message) {
+            const scvp::ui::ExportStats& s = window.lastExportStats();
+            auto pct = [&s](double busy) { return s.seconds > 0 ? 100.0 * busy / s.seconds : 0.0; };
+            std::fprintf(stderr,
+                         "debug-export: %s %lld frames %dx%d via %s in %.2f s (%.1f fps; busy: decode A %.0f%% B %.0f%%, render %.0f%%, "
+                         "encode %.0f%%; %d missing) -> %s%s%s\n",
+                         ok ? "done" : "FAILED", static_cast<long long>(s.frames), s.width, s.height, s.encoder.c_str(), s.seconds,
+                         s.seconds > 0 ? s.frames / s.seconds : 0.0, pct(s.decode[0]), pct(s.decode[1]), pct(s.render), pct(s.encode),
+                         s.missing, qPrintable(o.path), message.isEmpty() ? "" : ": ", qPrintable(message));
+            QApplication::exit(ok ? 0 : 1);
         });
         wait->start();
     }
-    if (parser.isSet(debugGrab)) {
-        const QString out = parser.value(debugGrab);
-        const bool wholeWindow = parser.isSet(debugGrabWindow);
-        QTimer::singleShot(parser.value(debugAfter).toInt(), &window, [&window, out, wholeWindow] {
+
+    if (parser.isSet(QStringLiteral("debug-grab"))) {
+        const QString out = parser.value(QStringLiteral("debug-grab"));
+        const bool wholeWindow = parser.isSet(QStringLiteral("debug-grab-window"));
+        QTimer::singleShot(parser.value(QStringLiteral("debug-after")).toInt(), &window, [&window, out, wholeWindow] {
             const QImage img = wholeWindow ? window.grab().toImage() : window.view()->grabFramebuffer();
             const bool ok = img.save(out);
             std::fprintf(stderr, "debug-grab: %s %dx%d -> %s (frame %lld)\n", ok ? "saved" : "FAILED", img.width(), img.height(),
@@ -268,6 +394,7 @@ int main(int argc, char* argv[])
             const scvp::ui::HudOverlay* hud = window.hud();
             std::fprintf(stderr, "debug-legend: %s, A \"%s\", B \"%s\"\n", hud->legendVisible() ? "on" : "off",
                          qPrintable(hud->slotName(0)), qPrintable(hud->slotName(1)));
+            std::fprintf(stderr, "debug-state: %s\n", qPrintable(debugState(window)));
             QApplication::exit(ok ? 0 : 1);
         });
     }

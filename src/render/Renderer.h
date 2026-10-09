@@ -73,6 +73,8 @@ public:
     // timings, read-back) as they were. The context must be current; null when the GPU cannot
     // allocate the image.
     QImage capture(const RenderState& screen, double factor);
+    // The state capture() draws: `screen` on a device `factor` times larger.
+    static RenderState captureState(const RenderState& screen, double factor);
     // How much larger than the screen a capture of `state` should be drawn: enough that no shown
     // video is minified (each of its pixels gets at least one image pixel), never less than 1,
     // and within maxSide x maxSide and maxPixels.

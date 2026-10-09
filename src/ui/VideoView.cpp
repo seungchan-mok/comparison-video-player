@@ -178,6 +178,15 @@ QImage VideoView::capture(double* factor)
     return img;
 }
 
+render::RenderState VideoView::renderState()
+{
+    updateGeometry();
+    render::RenderState s = m_state;
+    s.probe = false;
+    s.sampleProbe = false;
+    return s;
+}
+
 void VideoView::leaveEvent(QEvent* e)
 {
     m_hovering = false;
@@ -208,6 +217,18 @@ void VideoView::zoomSteps(int steps)
     const QSizeF pane = m_state.view.viewportSize();
     const QPointF anchor = rect().contains(local) ? toPane(local) : QPointF(pane.width() / 2.0, pane.height() / 2.0);
     m_state.view.zoomSteps(steps, anchor);
+    emit viewChanged();
+    update();
+}
+
+void VideoView::zoomTo(double scale, std::optional<QPointF> pixel)
+{
+    updateGeometry();  // the pane size of the frames shown now
+    const QSizeF pane = m_state.view.viewportSize();
+    const QPointF mid(pane.width() / 2.0, pane.height() / 2.0);
+    m_state.view.zoomTo(scale, mid);
+    if (pixel)
+        m_state.view.panBy(mid - m_state.view.imageToDevice(*pixel + QPointF(0.5, 0.5)));
     emit viewChanged();
     update();
 }

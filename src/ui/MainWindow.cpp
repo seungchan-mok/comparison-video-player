@@ -5,6 +5,7 @@
 #include "ui/ClipboardImage.h"
 #include "ui/ControlBar.h"
 #include "ui/DesktopIntegration.h"
+#include "ui/ExportProgress.h"
 #include "ui/HudOverlay.h"
 #include "ui/KeyRouter.h"
 #include "ui/LegendDialog.h"
@@ -16,17 +17,22 @@
 
 #include "ui/SettingsDialog.h"
 
+#include "render/OffscreenView.h"
+
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include <QActionGroup>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QGuiApplication>
+#include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
@@ -45,6 +51,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_hud(new HudOverlay(m_player, m_view))
     , m_keys(new KeyRouter(this, m_view, KeyMap::defaults(), [this] { return m_player->controller().positionShown(); }, this))
     , m_clipboard(new ClipboardImage(this))
+    , m_exportProgress(new ExportProgress(this))
 {
     setCentralWidget(m_stage);
     setAcceptDrops(true);
@@ -62,6 +69,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_view, &VideoView::compareChanged, m_hud, qOverload<>(&QWidget::update));
     connect(m_view, &VideoView::sampleChanged, this, [this](const render::PixelSample& s) { m_hud->setPixelText(formatPixelSample(s)); });
     connect(m_player, &Player::mediaChanged, m_hud, qOverload<>(&QWidget::update));
+    connect(m_player, &Player::mediaChanged, this, [this] { m_exportAction->setEnabled(m_player->slotOpen(0) || m_player->slotOpen(1)); });
     connect(m_clipboard, &ClipboardImage::copied, this, [this](QSize size) {
         m_hud->showMessage(tr("View copied to the clipboard (%1 x %2)").arg(size.width()).arg(size.height()));
         emit viewCopied(size, m_copyFactor);
@@ -71,11 +79,11 @@ MainWindow::MainWindow(QWidget* parent)
 
 MainWindow::~MainWindow() = default;
 
-bool MainWindow::openFile(int slot, const QString& path, bool askRaw)
+bool MainWindow::openFile(int slot, const QString& path, bool askRaw, const std::optional<RawVideoParams>& raw)
 {
     InputOptions opts;
-    if (m_rawOverride) {
-        opts.raw = m_rawOverride;
+    if (raw) {
+        opts.raw = raw;
     } else if (askRaw || isRawVideoExtension(path.toUtf8().toStdString())) {
         RawVideoParams p = parseRawVideoName(path.toUtf8().toStdString());
         if (askRaw || !p.valid()) {
@@ -89,6 +97,8 @@ bool MainWindow::openFile(int slot, const QString& path, bool askRaw)
     const QString before = m_player->slotOpen(slot) ? QString::fromStdString(m_player->engine().info(slot).path) : QString();
     QString err;
     if (!m_player->open(slot, path, opts, &err)) {
+        // Also for whoever started SCVP from a script and cannot see the dialog.
+        std::fprintf(stderr, "scvp: cannot open %s: %s\n", qPrintable(path), qPrintable(err));
         QMessageBox::warning(this, tr("Cannot open file"), tr("%1\n\n%2").arg(path, err));
         return false;
     }
@@ -156,6 +166,7 @@ void MainWindow::handleAction(Action a, bool)
         const render::ColorOverrides a = m_view->colorOverrides(0);
         m_view->setColorOverrides(0, m_view->colorOverrides(1));
         m_view->setColorOverrides(1, a);
+        syncColorActions();
         const QString legendA = m_hud->legendText(0);  // names follow their videos
         m_hud->setLegendText(0, m_hud->legendText(1));
         m_hud->setLegendText(1, legendA);
@@ -179,7 +190,7 @@ void MainWindow::handleAction(Action a, bool)
             m_hud->flashSlot(after.flipShowsB ? 1 : 0);
         break;
     }
-    case Action::Legend: setLegendVisible(!m_settings.legend); break;
+    case Action::Legend: setLegendVisible(!m_hud->legendVisible()); break;
     case Action::LegendText: editLegendText(); break;
     case Action::CopyView: copyView(); break;
     case Action::SmoothScaling:
@@ -271,6 +282,11 @@ QString MainWindow::inspectorText() const { return m_hud->pixelText(); }
 void MainWindow::setLegendVisible(bool on)
 {
     m_settings.legend = on;
+    showLegend(on);
+}
+
+void MainWindow::showLegend(bool on)
+{
     m_hud->setLegendVisible(on);
     syncViewActions();
 }
@@ -279,7 +295,7 @@ void MainWindow::setLegendText(int slot, const QString& text)
 {
     m_hud->setLegendText(slot, text);
     if (!text.isEmpty())
-        setLegendVisible(true);  // naming a video is asking to see the names
+        showLegend(true);  // naming a video is asking to see the names
 }
 
 // What is on screen, sharper where the screen loses detail: the video area is drawn again at
@@ -322,15 +338,26 @@ void MainWindow::editLegendText()
     const std::optional<LegendDialog::Texts> texts = LegendDialog::ask(this, entries);
     if (!texts)
         return;
+    bool named = false;
     for (int slot = 0; slot < Engine::kSlots; ++slot)
-        if (entries[size_t(slot)].open)
+        if (entries[size_t(slot)].open) {
             setLegendText(slot, (*texts)[size_t(slot)]);
+            named |= !(*texts)[size_t(slot)].isEmpty();
+        }
+    if (named)
+        setLegendVisible(true);  // named here: keep the legend on in later runs, as the L key does
 }
 
 void MainWindow::setCompare(const render::CompareSettings& c)
 {
     m_view->setCompare(c);
     m_hud->update();
+}
+
+void MainWindow::setColorOverrides(int slot, const render::ColorOverrides& o)
+{
+    m_view->setColorOverrides(slot, o);
+    syncColorActions();
 }
 
 QAction* MainWindow::playerAction(QMenu* menu, Action a)
@@ -364,6 +391,10 @@ void MainWindow::createMenus()
     QAction* closeB = file->addAction(tr("Close B"), this, [this] { m_player->close(1); updateTitle(); });
     closeB->setShortcut(QKeySequence(Qt::ControlModifier | Qt::ShiftModifier | Qt::Key_W));
     file->addSeparator();
+    m_exportAction = file->addAction(tr("&Export Comparison Video..."), this, &MainWindow::exportVideo);
+    m_exportAction->setShortcut(QKeySequence(Qt::ControlModifier | Qt::Key_E));
+    m_exportAction->setEnabled(false);
+    file->addSeparator();
     if (desktop::supported())
         file->addAction(tr("Make SCVP the Default Video Player..."), this, &MainWindow::offerDefaultPlayer);
     QAction* settings = file->addAction(tr("&Settings..."), this, &MainWindow::showSettings);
@@ -373,7 +404,7 @@ void MainWindow::createMenus()
     quit->setShortcut(QKeySequence::Quit);
     quit->setMenuRole(QAction::QuitRole);
     // App commands must also work while the menu bar is hidden (fullscreen).
-    addActions({openA, openB, close, closeB, settings, quit});
+    addActions({openA, openB, close, closeB, m_exportAction, settings, quit});
 
     QMenu* edit = menuBar()->addMenu(tr("&Edit"));
     playerAction(edit, Action::CopyView);
@@ -429,35 +460,38 @@ void MainWindow::createColorMenu()
         const QString v = slot == 0 ? QStringLiteral("A") : QStringLiteral("B");
         QMenu* matrix = color->addMenu(tr("%1: YUV matrix").arg(v));
         auto* mg = new QActionGroup(matrix);
+        m_matrixGroup[size_t(slot)] = mg;
         const std::pair<const char*, std::optional<AVColorSpace>> matrices[] = {
             {"Auto (metadata)", std::nullopt}, {"BT.601", AVCOL_SPC_BT470BG}, {"BT.709", AVCOL_SPC_BT709}, {"BT.2020", AVCOL_SPC_BT2020_NCL}};
         for (const auto& [name, cs] : matrices) {
             QAction* a = matrix->addAction(tr(name));
             a->setCheckable(true);
-            a->setChecked(!cs);
+            a->setData(cs ? int(*cs) : -1);
             mg->addAction(a);
             connect(a, &QAction::triggered, this, [this, slot, cs = cs] {
                 render::ColorOverrides o = m_view->colorOverrides(slot);
                 o.matrix = cs;
-                m_view->setColorOverrides(slot, o);
+                setColorOverrides(slot, o);
             });
         }
         QMenu* range = color->addMenu(tr("%1: range").arg(v));
         auto* rg = new QActionGroup(range);
+        m_rangeGroup[size_t(slot)] = rg;
         const std::pair<const char*, std::optional<AVColorRange>> ranges[] = {
             {"Auto (metadata)", std::nullopt}, {"Limited (16-235)", AVCOL_RANGE_MPEG}, {"Full (0-255)", AVCOL_RANGE_JPEG}};
         for (const auto& [name, r] : ranges) {
             QAction* a = range->addAction(tr(name));
             a->setCheckable(true);
-            a->setChecked(!r);
+            a->setData(r ? int(*r) : -1);
             rg->addAction(a);
             connect(a, &QAction::triggered, this, [this, slot, r = r] {
                 render::ColorOverrides o = m_view->colorOverrides(slot);
                 o.range = r;
-                m_view->setColorOverrides(slot, o);
+                setColorOverrides(slot, o);
             });
         }
     }
+    syncColorActions();
     color->addSeparator();
     QAction* bilinear = color->addAction(tr("Interpolate chroma (bilinear)"));
     bilinear->setCheckable(true);
@@ -476,12 +510,28 @@ void MainWindow::syncViewActions()
     if (m_smoothAction)
         m_smoothAction->setChecked(m_settings.smoothScaling);
     if (m_legendAction)
-        m_legendAction->setChecked(m_settings.legend);
+        m_legendAction->setChecked(m_hud->legendVisible());  // the command line may show it for this run only
+}
+
+// The checks follow the view (swapping A and B, the command line), not only the menu's own clicks.
+void MainWindow::syncColorActions()
+{
+    for (int slot = 0; slot < 2; ++slot) {
+        const render::ColorOverrides& o = m_view->colorOverrides(slot);
+        if (QActionGroup* g = m_matrixGroup[size_t(slot)])
+            for (QAction* a : g->actions())
+                a->setChecked(a->data().toInt() == (o.matrix ? int(*o.matrix) : -1));
+        if (QActionGroup* g = m_rangeGroup[size_t(slot)])
+            for (QAction* a : g->actions())
+                a->setChecked(a->data().toInt() == (o.range ? int(*o.range) : -1));
+    }
 }
 
 void MainWindow::applySettings(const AppSettings& s)
 {
     const bool hwChanged = s.hwdec != m_settings.hwdec;
+    // Only a changed setting replaces a legend shown for this run (command line).
+    const bool legendChanged = s.legend != m_settings.legend;
     m_settings = s;
     m_player->engine().setHardware(s.hwConfig());
     if (s.hwConfig().policy != HwPolicy::Off)
@@ -490,7 +540,8 @@ void MainWindow::applySettings(const AppSettings& s)
     if (s.vramMb)
         m_player->engine().setGpuMemoryBudget(s.vramBytes());
     m_view->setSmoothScaling(s.smoothScaling);
-    m_hud->setLegendVisible(s.legend);
+    if (legendChanged)
+        m_hud->setLegendVisible(s.legend);
     syncViewActions();
     m_player->setJumpSettings(s.jumps);
     m_controls->setJumpSettings(s.jumps);
@@ -590,11 +641,157 @@ void MainWindow::dropEvent(QDropEvent* e)
 
 void MainWindow::closeEvent(QCloseEvent* e)
 {
+    if (m_export) {
+        if (QMessageBox::question(this, tr("Export running"), tr("An export is still running. Stop it and quit?"),
+                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+            e->ignore();
+            return;
+        }
+        m_export.reset();  // cancels, removes the partial output and waits for its threads
+    }
     if (isFullScreen())
         toggleFullscreen();
     m_settings.geometry = saveGeometry();
     m_settings.save();
     QMainWindow::closeEvent(e);
+}
+
+// The export of the videos and the view as they are now. Full frames: the comparison mode with
+// the videos 1:1 (scaled by the size option), labels as large as on a 1080-line screen. As on
+// screen: what Ctrl+C would copy, as large as a copy is drawn, for every frame of the range.
+std::optional<ExportSpec> MainWindow::exportSpec(const ExportOptions& o, QString* error)
+{
+    ExportSpec spec;
+    Engine& engine = m_player->engine();
+    for (int slot = 0; slot < Engine::kSlots; ++slot)
+        if (m_player->slotOpen(slot))
+            spec.sources[size_t(slot)] = engine.source(slot);
+    if (!spec.sources[0] && !spec.sources[1]) {
+        if (error)
+            *error = tr("Open a video first.");
+        return std::nullopt;
+    }
+    spec.hw = engine.hardware();
+    PlaybackController& pc = m_player->controller();
+    spec.mapper = pc.mapper();
+    const int64_t length = pc.length();
+    spec.first = std::clamp<int64_t>(o.first, 0, std::max<int64_t>(0, length - 1));
+    spec.last = o.last < o.first ? length - 1 : std::min<int64_t>(o.last, length - 1);
+    const double scale = std::clamp(o.scale, 1, 100) / 100.0;
+    render::RenderState screen = m_view->renderState();
+    double textScale = 1.0;
+    if (o.picture == ExportPicture::Screen) {
+        // As large as a copy (no shown video minified), then the size option.
+        const double f = render::Renderer::captureFactor(screen, render::Renderer::kMaxCaptureSide, render::Renderer::kMaxCapturePixels) * scale;
+        spec.view = render::Renderer::captureState(screen, f);
+        textScale = screen.devicePixelRatio * f;
+    } else {
+        const VideoInfo info = engine.info(spec.sources[0] ? 0 : 1);
+        const QSizeF image = info.width > 0 ? QSizeF(info.width, info.height) : screen.view.imageSize();
+        spec.view = render::OffscreenView::fullFrameState(screen, image, spec.sources[0] != nullptr, spec.sources[1] != nullptr, scale);
+        textScale = std::max(1.0, image.height() * scale / 1080.0);
+    }
+    spec.view.frames = {};
+    spec.labels = o.labels;
+    spec.legend = m_hud->legendVisible();
+    spec.frameInfo = o.frameInfo;
+    spec.scene = m_hud->scene();
+    spec.scene.dpr = textScale;
+    spec.mono = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    spec.encoder.format = o.format;
+    spec.encoder.encoder = o.encoder.toStdString();
+    spec.encoder.quality = o.quality;
+    spec.encoder.frameRate = av_d2q(spec.mapper.fps(), 1001000);
+    spec.path = o.path.toUtf8().toStdString();
+    return spec;
+}
+
+bool MainWindow::startExport(const ExportOptions& o, QString* error)
+{
+    QString err;
+    std::optional<ExportSpec> spec;
+    if (m_export)
+        err = tr("An export is already running.");
+    else if (o.path.isEmpty())
+        err = tr("No file to export to.");
+    else
+        spec = exportSpec(o, &err);
+    // Frame numbers are final only once every video is indexed.
+    for (int slot = 0; spec && slot < Engine::kSlots; ++slot)
+        if (spec->sources[size_t(slot)] && !spec->sources[size_t(slot)]->indexComplete()) {
+            err = tr("The videos are still being indexed.");
+            spec.reset();
+        }
+    if (!spec) {
+        if (error)
+            *error = err;
+        return false;
+    }
+    m_export = std::make_unique<ExportJob>(std::move(*spec));
+    connect(m_export.get(), &ExportJob::finished, this, &MainWindow::exportDone);
+    m_exportProgress->start(m_export.get(), o.path);
+    m_export->start();
+    return true;
+}
+
+void MainWindow::exportDone(bool ok, const QString& message)
+{
+    m_lastExport = m_export->stats();
+    m_exportProgress->finish(ok, message, m_lastExport);
+    const QString name = QFileInfo(QString::fromStdString(m_export->spec().path)).fileName();
+    m_hud->showMessage(ok                     ? tr("Exported %1").arg(name)
+                       : m_lastExport.cancelled ? tr("Export cancelled")
+                                                : tr("Export failed: %1").arg(message),
+                       4000);
+    m_export.release()->deleteLater();  // its threads are done; it is still emitting
+    emit exportFinished(ok, message);
+}
+
+void MainWindow::exportVideo()
+{
+    if (m_export) {
+        m_exportProgress->show();
+        m_exportProgress->raise();
+        return;
+    }
+    if (!m_player->slotOpen(0) && !m_player->slotOpen(1))
+        return;
+    ExportOptions initial = ExportOptions::load();
+    QString dir = initial.lastDir();
+    if (dir.isEmpty())
+        dir = m_settings.lastDir.isEmpty() ? QDir::homePath() : m_settings.lastDir;
+    QStringList names;
+    for (int slot = 0; slot < Engine::kSlots; ++slot)
+        if (m_player->slotOpen(slot))
+            names << QFileInfo(QString::fromStdString(m_player->engine().info(slot).path)).completeBaseName();
+    initial.path = QDir(dir).filePath(names.join(QStringLiteral("_vs_")) + QLatin1Char('.') + QLatin1String(VideoEncoder::extension(initial.format)));
+    auto timeline = [this] {
+        ExportTimeline t;
+        PlaybackController& pc = m_player->controller();
+        t.length = pc.length();
+        for (int slot = 0; slot < Engine::kSlots; ++slot)
+            if (m_player->slotOpen(slot)) {
+                const SlotStats st = m_player->engine().stats(slot);
+                t.final = t.final && st.indexComplete;
+                t.indexProgress = std::min(t.indexProgress, st.indexProgress);
+            }
+        t.hasLoop = pc.hasLoop();
+        t.loopFirst = pc.loopFirst();
+        t.loopLast = pc.loopLast();
+        t.fps = pc.frameRate();
+        return t;
+    };
+    auto size = [this](const ExportOptions& o) {
+        const std::optional<ExportSpec> s = exportSpec(o, nullptr);
+        return s ? s->view.framebufferSize : QSize();
+    };
+    const std::optional<ExportOptions> chosen = ExportDialog::ask(this, initial, timeline, size);
+    if (!chosen)
+        return;
+    chosen->save();
+    QString err;
+    if (!startExport(*chosen, &err))
+        QMessageBox::warning(this, tr("Cannot export"), err);
 }
 
 } // namespace scvp::ui

@@ -185,6 +185,19 @@ void ControlBar::syncTransport()
     m_loop->setChecked(m_player->loopActive());
     m_loop->setEnabled(m_player->hasLoop());
     m_loopLabel->setText(m_player->hasLoop() ? QStringLiteral("%1-%2").arg(m_player->loopFirst()).arg(m_player->loopLast()) : QString());
+    // A speed set elsewhere (command line) shows here too; one not in the list gets its item.
+    const double speed = m_player->controller().speed();
+    int i = m_speed->findData(speed);
+    if (i < 0) {
+        i = 0;
+        while (i < m_speed->count() && m_speed->itemData(i).toDouble() < speed)
+            ++i;
+        m_speed->insertItem(i, QStringLiteral("%1x").arg(speed), speed);
+    }
+    if (i != m_speed->currentIndex()) {
+        const QSignalBlocker block(m_speed);
+        m_speed->setCurrentIndex(i);
+    }
 }
 
 void ControlBar::syncPosition()

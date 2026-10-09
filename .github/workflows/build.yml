@@ -28,24 +28,81 @@ jobs:
         # GL tests need a display: run everything on Xvfb with Mesa's llvmpipe (no GPU on CI;
         # hardware-decoding and CUDA tests skip themselves).
         run: scripts/xvfb-run.sh ctest --preset dev
-      - name: Package
+
+  linux-bundle:
+    # The release package: glibc 2.28, Qt 6.8 and an LGPL FFmpeg built in packaging/linux/Dockerfile,
+    # so it runs on Ubuntu 20.04+, Debian, Fedora and RHEL 8+ with nothing else installed.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Builder image
+        uses: docker/build-push-action@v6
+        with:
+          context: packaging/linux
+          load: true
+          tags: scvp-linux-builder:ci
+          cache-from: type=gha,scope=linux-builder
+          cache-to: type=gha,mode=max,scope=linux-builder
+      - name: Bundle
+        run: SCVP_BUILDER_IMAGE=scvp-linux-builder:ci scripts/package-linux.sh
+      - name: Test clips
         run: |
-          cmake --preset release
-          cmake --build --preset release
-          cd build/release && cpack
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          scripts/smoke-linux-bundle.sh clips smoke-clips
       - uses: actions/upload-artifact@v4
         with:
           name: scvp-linux
-          path: build/release/scvp-*.tar.gz
+          path: |
+            dist/scvp-*-linux-x86_64.tar.gz
+            dist/scvp-*-x86_64.AppImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-clips
+          path: smoke-clips
+
+  linux-bundle-smoke:
+    # The bundle on fresh distributions with only a desktop's base system (scripts/smoke-linux-bundle.sh).
+    needs: linux-bundle
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:20.04
+            packages: libva2 libva-drm2  # the oldest system libva (2.7) next to the bundled FFmpeg
+          - image: ubuntu:22.04
+          - image: ubuntu:24.04
+            packages: libva2 libva-drm2
+          - image: debian:12
+          - image: fedora:latest
+          - image: rockylinux:8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: scvp-linux
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: smoke-clips
+          path: smoke-clips
+      - name: Smoke test on ${{ matrix.image }}
+        # Artifacts lose the executable bit; the script also runs the AppImage next to the tarball.
+        run: |
+          chmod +x dist/*.AppImage
+          scripts/smoke-linux-bundle.sh ${{ matrix.image }} dist/scvp-*-linux-x86_64.tar.gz smoke-clips ${{ matrix.packages }}
 
   macos:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - name: Dependencies
-        run: brew install qt ffmpeg ninja pkg-config
+        # qtbase only: the full qt formula brings plugins whose frameworks the app does not ship.
+        run: brew install qtbase ffmpeg ninja pkg-config
       - name: Configure
-        run: cmake --preset dev -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+        run: cmake --preset dev -DCMAKE_PREFIX_PATH="$(brew --prefix qtbase)"
       - name: Build
         run: cmake --build --preset dev
       - name: Test fixtures
@@ -54,9 +111,13 @@ jobs:
         run: ctest --preset dev
       - name: Package
         run: |
-          cmake --preset release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+          cmake --preset release -DCMAKE_PREFIX_PATH="$(brew --prefix qtbase)"
           cmake --build --preset release
           cd build/release && cpack
+      - name: Check package
+        # Nothing in the app comes from Homebrew; the app from the dmg plays a clip with
+        # /opt/homebrew moved away.
+        run: scripts/check-macos-bundle.sh build/release/scvp-*.dmg tests/fixtures/out/h264_b.mp4
       - uses: actions/upload-artifact@v4
         with:
           name: scvp-macos
@@ -97,13 +158,86 @@ jobs:
       - name: Test
         # Without fixtures (the LGPL FFmpeg build has no x264/x265 encoders): unit tests only.
         run: ctest --preset dev
+      - name: Failed tests, run directly
+        # ctest shows a test that crashed or called abort() as just "Failed", without the output
+        # it had not flushed: run each failed one again for its exit code and whole output.
+        if: failure()
+        run: |
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          foreach ($line in Get-Content build/dev/Testing/Temporary/LastTestsFailed.log -ErrorAction SilentlyContinue) {
+            $name = ($line -split ':', 2)[1]
+            $exe, $fn = $name -split '\.', 2
+            $path = Get-ChildItem build/dev -Recurse -Filter "$exe.exe" | Select-Object -First 1
+            if (-not $path) { continue }
+            $log = Join-Path $env:RUNNER_TEMP "$name.txt"
+            $testArgs = @($fn | Where-Object { $_ }) + @('-o', "$log,txt", '-o', '-,txt')
+            Write-Host "== $name"
+            & $path.FullName @testArgs 2>&1 | Out-Host
+            Write-Host ('exit code 0x{0:X8}' -f $LASTEXITCODE)
+            Get-Content $log -ErrorAction SilentlyContinue | Out-Host
+          }
       - name: Package
         run: |
           cmake --preset release -DFFMPEG_ROOT="${{ env.FFMPEG_ROOT }}"
           cmake --build --preset release
           cd build/release
           cpack
+      - name: OpenGL for the checks
+        # Runners have no GPU driver that does OpenGL 3.3: Mesa's llvmpipe stands in for one in
+        # the checks' runs (not shipped).
+        run: |
+          curl.exe -fsSL -o mesa.7z https://github.com/pal1000/mesa-dist-win/releases/download/26.2.4/mesa3d-26.2.4-release-msvc.7z
+          if ((Get-FileHash mesa.7z -Algorithm SHA256).Hash -ne '351fc8c8b695878ffb3eaa044b3ead08672a48b1a045e3c3e3975811df0f6695') { throw 'mesa.7z checksum mismatch' }
+          7z e mesa.7z -omesa -y "x64\opengl32.dll" "x64\libgallium_wgl.dll" | Out-Null
+          if (-not (Test-Path mesa/opengl32.dll)) { throw "no opengl32.dll in mesa.7z" }
+          Get-ChildItem mesa
+      - name: Check package
+        # The zip must run on a clean PC: every import shipped (FFmpeg's own DLLs, the VC++
+        # runtime), and the program shows a video with nothing but Windows on PATH.
+        run: |
+          ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=320x240:rate=25 -frames:v 25 -c:v mpeg4 -q:v 2 clip.mp4
+          Expand-Archive (Get-Item build/release/scvp-*.zip).FullName -DestinationPath unpacked
+          scripts/check-windows-bundle.ps1 -Dir (Get-ChildItem unpacked -Directory)[0].FullName -Clip clip.mp4 -GlDriver mesa
+      - name: Installer
+        # Per-user setup.exe (NSIS) with the zip's files and the icon drawn by scvp itself.
+        run: |
+          Expand-Archive (Get-Item build/release/scvp-*.zip).FullName -DestinationPath stage
+          $src = (Get-ChildItem stage -Directory)[0].FullName
+          Start-Process "$src\bin\scvp.exe" -ArgumentList '--export-ico', "$src\scvp.ico" -Wait -NoNewWindow
+          if (-not (Test-Path "$src\scvp.ico")) { throw 'scvp.exe --export-ico wrote nothing' }
+          $makensis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
+          if (-not $makensis) { $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
+          if (-not (Test-Path $makensis)) { choco install nsis -y --no-progress; $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
+          $version = (Get-Item build/release/scvp-*.zip).Name -replace '^scvp-(.*)-win64\.zip$', '$1'
+          & $makensis /V2 "/DVERSION=$version" "/DSRC=$src" "/DOUT=$PWD\build\release\scvp-$version-win64-setup.exe" packaging\windows\scvp.nsi
+          if ($LASTEXITCODE) { throw "makensis failed ($LASTEXITCODE)" }
+      - name: Check installer
+        # Silent install, the same checks on the installed copy, the registrations, then a silent
+        # uninstall that leaves nothing behind.
+        run: |
+          $setup = (Get-Item build/release/scvp-*-setup.exe).FullName
+          Start-Process $setup -ArgumentList '/S' -Wait
+          $dir = "$env:LOCALAPPDATA\Programs\SCVP"
+          scripts/check-windows-bundle.ps1 -Dir $dir -Clip clip.mp4 -GlDriver mesa
+          $keys = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\SCVP',
+                  'HKCU:\Software\Classes\SCVP.video\shell\open\command',
+                  'HKCU:\Software\Classes\.mp4\OpenWithProgids',
+                  'HKCU:\Software\Classes\Applications\scvp.exe\SupportedTypes',
+                  'HKCU:\Software\SCVP\Capabilities\FileAssociations'
+          foreach ($k in $keys) { if (-not (Test-Path $k)) { throw "not registered: $k" } }
+          if ((Get-ItemProperty HKCU:\Software\RegisteredApplications).SCVP -ne 'Software\SCVP\Capabilities') { throw 'not in RegisteredApplications' }
+          $lnk = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\SCVP.lnk"
+          if (-not (Test-Path $lnk)) { throw 'no Start menu entry' }
+          # The uninstaller copies itself to TEMP and returns at once: wait for the folder to go.
+          Start-Process "$dir\Uninstall.exe" -ArgumentList '/S' -Wait
+          for ($i = 0; $i -lt 60 -and (Test-Path $dir); $i++) { Start-Sleep 1 }
+          $left = @($dir, $lnk) + $keys | Where-Object { Test-Path $_ }
+          if ((Get-ItemProperty HKCU:\Software\RegisteredApplications).SCVP) { $left += 'RegisteredApplications\SCVP' }
+          if ($left) { throw "left after uninstall: $($left -join ', ')" }
+          Write-Host 'installer: install, run, registrations and uninstall OK'
       - uses: actions/upload-artifact@v4
         with:
           name: scvp-windows
-          path: build/release/scvp-*.zip
+          path: |
+            build/release/scvp-*.zip
+            build/release/scvp-*-setup.exe

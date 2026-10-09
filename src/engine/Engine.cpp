@@ -159,6 +159,13 @@ FrameIndexPtr Engine::index(int slot) const
     return s ? s->source->index() : nullptr;
 }
 
+std::shared_ptr<IVideoSource> Engine::source(int slot) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const Slot* s = slot >= 0 && slot < kSlots ? m_slots[size_t(slot)].get() : nullptr;
+    return s ? s->source : nullptr;
+}
+
 void Engine::setMemoryBudget(size_t bytes)
 {
     std::lock_guard<std::mutex> lock(m_mutex);

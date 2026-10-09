@@ -46,7 +46,7 @@
     { "name": "tsan", "configurePreset": "tsan" }
   ],
   "testPresets": [
-    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true }, "execution": { "jobs": 8 } },
+    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true }, "execution": { "jobs": 8, "timeout": 600 } },
     { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } },
     { "name": "tsan", "configurePreset": "tsan", "output": { "outputOnFailure": true } }
   ]

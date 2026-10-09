@@ -4,6 +4,7 @@
 #  * Default: pkg-config (Linux distributions, Homebrew).
 #  * FFMPEG_ROOT=<prefix> with include/ and lib/ (and bin/ on Windows): prebuilt SDKs such as
 #    the BtbN Windows builds, or the no-root Ubuntu prefix made by scripts/fetch-ubuntu-deps.sh.
+#    On Windows, SCVP_FFMPEG_RUNTIME_DLLS lists every FFmpeg DLL the program needs at run time.
 #
 # Minimum supported version: FFmpeg 6.1 (libavcodec 60.31, libavformat 60.16, libavutil 58.29).
 
@@ -25,6 +26,7 @@ if(FFMPEG_ROOT)
                 message(FATAL_ERROR "FFmpeg DLL for ${comp} not found in ${FFMPEG_ROOT}/bin")
             endif()
             list(GET _scvp_dll 0 _scvp_dll)
+            list(APPEND SCVP_FFMPEG_RUNTIME_DLLS "${_scvp_dll}")
             add_library(FFmpeg::${comp} SHARED IMPORTED)
             set_target_properties(FFmpeg::${comp} PROPERTIES
                 IMPORTED_IMPLIB "${SCVP_FFMPEG_${comp}_LIBRARY}"
@@ -38,6 +40,12 @@ if(FFMPEG_ROOT)
             INTERFACE_INCLUDE_DIRECTORIES "${SCVP_FFMPEG_INCLUDE_DIR}")
         target_link_libraries(scvp_ffmpeg INTERFACE FFmpeg::${comp})
     endforeach()
+    if(WIN32)
+        # libavcodec imports libswresample although we never link it: without it the program
+        # does not start on a PC that has no FFmpeg on PATH.
+        file(GLOB _scvp_dll "${FFMPEG_ROOT}/bin/swresample-*.dll")
+        list(APPEND SCVP_FFMPEG_RUNTIME_DLLS ${_scvp_dll})
+    endif()
     message(STATUS "FFmpeg: using FFMPEG_ROOT=${FFMPEG_ROOT}")
 else()
     find_package(PkgConfig REQUIRED)
