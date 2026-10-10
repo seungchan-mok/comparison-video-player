@@ -1,10 +1,8 @@
 name: build
 
 on:
-  push:
-    branches: [main, dev]
-    tags: ['v*']
-  pull_request:
+  # Run by hand only (Actions -> build -> Run workflow), when building release packages: Actions
+  # minutes are not spent on every push and pull request.
   workflow_dispatch:
 
 jobs:
@@ -242,28 +240,3 @@ jobs:
           path: |
             build/release/scvp-*.zip
             build/release/scvp-*-setup.exe
-
-  release-windows:
-    # A v* tag puts the checked Windows packages on that tag's GitHub Release: created if the tag
-    # has none yet, otherwise only these files are added or replaced and the rest is left alone.
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: windows
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-      TAG: ${{ github.ref_name }}
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: scvp-windows
-          path: windows
-      - name: Upload
-        run: |
-          # The package names carry the CMake project version: refuse to file them under a tag
-          # that names another version.
-          ls windows/scvp-${TAG#v}-win64.zip windows/scvp-${TAG#v}-win64-setup.exe
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "SCVP ${TAG#v}" --generate-notes
-          gh release upload "$TAG" windows/scvp-${TAG#v}-win64.zip windows/scvp-${TAG#v}-win64-setup.exe --clobber
