@@ -1,9 +1,8 @@
 name: build
 
 on:
-  push:
-    branches: [main, dev]
-  pull_request:
+  # Run by hand only (Actions -> build -> Run workflow), when building release packages: Actions
+  # minutes are not spent on every push and pull request.
   workflow_dispatch:
 
 jobs:

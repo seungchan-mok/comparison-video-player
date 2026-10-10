@@ -63,7 +63,7 @@ cmake --preset release && cmake --build --preset release
 cd build/release && cpack     # Windows: zip (Qt·FFmpeg DLL·VC++ 런타임 포함), macOS: dmg
 ```
 
-CI(`.github/workflows/build.yml`)가 세 OS에서 빌드·테스트·패키지를 만들고, 패키지가 다른 설치 없이 실행되는지 확인합니다(Linux: 여러 배포판의 깨끗한 컨테이너, Windows: Windows만 PATH에 둔 실행과 설치·삭제).
+CI(`.github/workflows/build.yml`, push·PR에는 돌지 않고 GitHub의 Actions → build → Run workflow로 수동 실행)가 세 OS에서 빌드·테스트·패키지를 만들고, 패키지가 다른 설치 없이 실행되는지 확인합니다(Linux: 여러 배포판의 깨끗한 컨테이너, Windows: Windows만 PATH에 둔 실행과 설치·삭제).
 
 `scripts/package-linux.sh` 는 tar.gz와 AppImage를 glibc 2.28 컨테이너([packaging/linux/Dockerfile](packaging/linux/Dockerfile): Qt 6.8, 거기서 빌드하는 LGPL FFmpeg)에서 번들을 만들고, 시스템 기본 라이브러리(glibc, OpenGL, X11, fontconfig 등) 외에는 모두 넣습니다. `scripts/smoke-linux-bundle.sh <이미지> <tar.gz> <클립>` 으로 원하는 배포판에서 확인할 수 있습니다.
 
