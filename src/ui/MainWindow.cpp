@@ -503,7 +503,7 @@ void MainWindow::createMenus()
     openA->setShortcut(QKeySequence::Open);
     QAction* openB = file->addAction(tr("Open &B (compare)..."), this, [this] { openDialog(1); });
     openB->setShortcut(QKeySequence(Qt::ControlModifier | Qt::ShiftModifier | Qt::Key_O));
-    // A folder of videos is a playlist (two pair by file name), a folder of images an image sequence.
+    // A folder with videos (also below it) is a playlist, two pair by path and name; images only: an image sequence.
     file->addAction(tr("Open &Folder as A..."), this, [this] { folderDialog(0); });
     file->addAction(tr("Open Folder as B (compare)..."), this, [this] { folderDialog(1); });
     file->addAction(tr("Open raw video as A..."), this, [this] { openDialog(0, true); });

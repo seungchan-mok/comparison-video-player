@@ -11,19 +11,19 @@ namespace scvp::ui {
 // "*.mp4", "*.mkv", ...: the videos a folder playlist picks up (case-insensitive as QDir name
 // filters); the open dialog's filter lists the same.
 const QStringList& videoNameFilters();
-// The folder itself holds a video (subfolders do not count): it opens as a playlist, not as an
-// image sequence.
+// A video is in the folder or a folder below it: it opens as a playlist, not as an image
+// sequence.
 bool folderHasVideos(const QString& dir);
 
 struct PlaylistItem {
-    QString name;                  // file name without the extension, shared by A and B
+    QString name;                  // path below the folder without the extension ("day1/clip"), shared by A and B
     std::array<QString, 2> paths;  // per slot; "" when that folder has no such video
 };
 
-// The videos of a folder per slot, paired by file name without the extension (clip.mp4 in A with
-// clip.mkv in B), in natural order of the names. A video only one folder has is an item of its
-// own with the other path empty; several videos of one name in a folder pair up in order, so no
-// file is left out.
+// The videos of a folder per slot, subfolders included, paired by their path below the folder
+// without the extension (day1/clip.mp4 in A with day1/clip.mkv in B), in natural order folder by
+// folder. A video only one folder has is an item of its own with the other path empty; several
+// videos of one name in a folder pair up in order, so no file is left out.
 class Playlist {
 public:
     // "" drops the slot's folder. The items are paired again; the current item stays when its

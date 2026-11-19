@@ -9,12 +9,13 @@ using namespace scvp::ui;
 
 namespace {
 
-// A folder under `root` holding empty files with these names (pairing reads names only).
+// A folder under `root` holding empty files at these paths (pairing reads names only).
 QString folder(const QTemporaryDir& root, const QString& name, const QStringList& files)
 {
     QDir(root.path()).mkpath(name);
     const QString dir = QDir(root.path()).filePath(name);
     for (const QString& f : files) {
+        QDir(dir).mkpath(QFileInfo(f).path());
         QFile file(QDir(dir).filePath(f));
         file.open(QIODevice::WriteOnly);
     }
@@ -88,6 +89,28 @@ private slots:
         QVERIFY(!folderHasVideos(folder(root, QStringLiteral("images"), {QStringLiteral("f_0001.png"), QStringLiteral("f_0002.png")})));
         QVERIFY(!folderHasVideos(QDir(a).filePath(QStringLiteral("v.mp4"))));  // a file is not a folder
         QVERIFY(!folderHasVideos(QDir(root.path()).filePath(QStringLiteral("missing"))));
+    }
+
+    // Subfolders count: videos pair by their path below the folder without the extension, in
+    // natural order folder by folder (day2 before day10); hidden folders are skipped.
+    void subfoldersPairByPath()
+    {
+        QTemporaryDir root;
+        Playlist p;
+        p.setFolder(0, folder(root, QStringLiteral("a"), {QStringLiteral("clip.mp4"), QStringLiteral("day1/clip.mp4"), QStringLiteral("day10/x.mp4"),
+                                                          QStringLiteral("day2/x.mp4"), QStringLiteral("day2/deep/y.mp4"), QStringLiteral(".git/z.mp4"),
+                                                          QStringLiteral("imgs/f_0001.png")}));
+        p.setFolder(1, folder(root, QStringLiteral("b"), {QStringLiteral("day1/clip.mkv"), QStringLiteral("day2/x.mkv"), QStringLiteral("clip.mov")}));
+        QCOMPARE(names(p), (QStringList{QStringLiteral("clip"), QStringLiteral("day1/clip"), QStringLiteral("day2/deep/y"), QStringLiteral("day2/x"),
+                                        QStringLiteral("day10/x")}));
+        QCOMPARE(fileNames(p, 0), (QStringList{QStringLiteral("clip.mp4"), QStringLiteral("clip.mp4"), QStringLiteral("y.mp4"), QStringLiteral("x.mp4"),
+                                               QStringLiteral("x.mp4")}));
+        QCOMPARE(fileNames(p, 1), (QStringList{QStringLiteral("clip.mov"), QStringLiteral("clip.mkv"), QStringLiteral("-"), QStringLiteral("x.mkv"),
+                                               QStringLiteral("-")}));
+        QCOMPARE(QDir(root.path()).relativeFilePath(p.items()[1].paths[1]), QStringLiteral("b/day1/clip.mkv"));
+        // Images on top, a video below: a playlist.
+        QVERIFY(folderHasVideos(folder(root, QStringLiteral("shots"), {QStringLiteral("f_0001.png"), QStringLiteral("sub/v.mp4")})));
+        QVERIFY(!folderHasVideos(folder(root, QStringLiteral("hidden"), {QStringLiteral("f_0001.png"), QStringLiteral(".cache/v.mp4")})));
     }
 
     // Pairing again (the second folder opened, one dropped) keeps the item being watched.
