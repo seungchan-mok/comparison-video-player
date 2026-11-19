@@ -18,6 +18,7 @@ add_library(scvp_ui STATIC
     OverlayPainter.h OverlayPainter.cpp
     PixelInspector.h PixelInspector.cpp
     Player.h Player.cpp
+    Playlist.h Playlist.cpp
     Settings.h Settings.cpp
     SettingsDialog.h SettingsDialog.cpp
     Stage.h Stage.cpp

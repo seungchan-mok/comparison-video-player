@@ -12,6 +12,7 @@
 #include "ui/OpenRawDialog.h"
 #include "ui/PixelInspector.h"
 #include "ui/Player.h"
+#include "ui/Playlist.h"
 #include "ui/Stage.h"
 #include "ui/VideoView.h"
 
@@ -596,9 +597,8 @@ void MainWindow::showSettings()
 
 void MainWindow::openDialog(int slot, bool raw)
 {
-    const QString filter = tr("Videos and images (*.mp4 *.mkv *.mov *.avi *.webm *.ts *.m2ts *.mts *.mpg *.mpeg *.m4v *.flv "
-                              "*.wmv *.mxf *.y4m *.h264 *.264 *.h265 *.265 *.hevc *.ivf *.obu *.yuv *.png *.jpg *.jpeg *.tif *.tiff);;"
-                              "All files (*)");
+    const QString filter = tr("Videos and images (%1 *.png *.jpg *.jpeg *.tif *.tiff);;All files (*)")
+                               .arg(videoNameFilters().join(QLatin1Char(' ')));
     const QString path = QFileDialog::getOpenFileName(this, tr("Open video"), m_settings.lastDir, filter);
     if (path.isEmpty())
         return;
