@@ -29,11 +29,13 @@
 #include <QCloseEvent>
 #include <QGuiApplication>
 #include <QDir>
+#include <QDockWidget>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFontDatabase>
+#include <QListWidget>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
@@ -57,6 +59,22 @@ MainWindow::MainWindow(QWidget* parent)
     setCentralWidget(m_stage);
     setAcceptDrops(true);
     connect(m_player, &Player::stalledChanged, m_hud, &HudOverlay::setStalled);
+    m_playlistDock = new QDockWidget(tr("Playlist"), this);
+    m_playlistDock->setObjectName(QStringLiteral("playlist"));
+    m_playlistList = new QListWidget(m_playlistDock);
+    m_playlistList->setFocusPolicy(Qt::NoFocus);  // the keys stay the player's (arrows jump, Page Up/Down switch items)
+    m_playlistDock->setWidget(m_playlistList);
+    addDockWidget(Qt::RightDockWidgetArea, m_playlistDock);
+    m_playlistDock->hide();
+    connect(m_playlistList, &QListWidget::itemActivated, this, [this](QListWidgetItem* row) { playItem(m_playlistList->row(row)); });
+    // Queued: the next item opens outside the playback tick that ended this one.
+    connect(
+        m_player, &Player::ended, this,
+        [this] {
+            if (playItem(m_playlist.current() + 1))
+                m_player->togglePlay();
+        },
+        Qt::QueuedConnection);
     createMenus();
     applySettings(AppSettings::load());
     if (!m_settings.geometry.isEmpty())
@@ -81,6 +99,19 @@ MainWindow::MainWindow(QWidget* parent)
 MainWindow::~MainWindow() = default;
 
 bool MainWindow::openFile(int slot, const QString& path, bool askRaw, const std::optional<RawVideoParams>& raw)
+{
+    if (!askRaw && !raw && folderHasVideos(path))
+        return openFolder(slot, path);
+    if (!openSlot(slot, path, askRaw, raw))
+        return false;
+    if (!m_playlist.folder(slot).isEmpty()) {
+        m_playlist.setFolder(slot, QString());  // this file now, for every item of the other folder
+        syncPlaylist();
+    }
+    return true;
+}
+
+bool MainWindow::openSlot(int slot, const QString& path, bool askRaw, const std::optional<RawVideoParams>& raw)
 {
     InputOptions opts;
     if (raw) {
@@ -110,6 +141,91 @@ bool MainWindow::openFile(int slot, const QString& path, bool askRaw, const std:
     return true;
 }
 
+// A folder opened: a new playlist, from its first item.
+bool MainWindow::openFolder(int slot, const QString& dir)
+{
+    m_playlist.setFolder(slot, QFileInfo(dir).absoluteFilePath());
+    m_playlistShownWindowed = true;
+    if (!isFullScreen())
+        m_playlistDock->show();
+    return playItem(0);
+}
+
+bool MainWindow::playItem(int i)
+{
+    if (i < 0 || i >= int(m_playlist.items().size()))
+        return false;
+    m_playlist.setCurrent(i);
+    const PlaylistItem item = m_playlist.items()[size_t(i)];  // a copy: a dialog while opening may change the list
+    bool ok = true;
+    for (int slot = 0; slot < Engine::kSlots; ++slot) {
+        if (m_playlist.folder(slot).isEmpty())
+            continue;  // a file opened on its own stays for every item
+        const QString& path = item.paths[size_t(slot)];
+        if (!path.isEmpty() && m_player->slotOpen(slot) && QFileInfo(QString::fromStdString(m_player->engine().info(slot).path)) == QFileInfo(path))
+            continue;
+        if (path.isEmpty() || !openSlot(slot, path)) {
+            // Never leave the previous item's video next to this item's.
+            m_player->close(slot);
+            ok = ok && path.isEmpty();
+        }
+    }
+    m_player->seek(0);
+    syncPlaylist();
+    m_hud->showMessage(tr("%1  (%2 / %3)").arg(item.name).arg(i + 1).arg(m_playlist.items().size()));
+    updateTitle();
+    return ok;
+}
+
+void MainWindow::syncPlaylist()
+{
+    m_playlistList->clear();
+    const bool both = !m_playlist.folder(0).isEmpty() && !m_playlist.folder(1).isEmpty();
+    for (const PlaylistItem& item : m_playlist.items()) {
+        QString text = item.name;
+        if (both && item.paths[1].isEmpty())
+            text += tr("  (A only)");
+        else if (both && item.paths[0].isEmpty())
+            text += tr("  (B only)");
+        auto* row = new QListWidgetItem(text, m_playlistList);
+        QStringList tip;
+        for (int slot = 0; slot < Engine::kSlots; ++slot)
+            if (!item.paths[size_t(slot)].isEmpty())
+                tip << (slot ? QStringLiteral("B: ") : QStringLiteral("A: ")) + QDir::toNativeSeparators(item.paths[size_t(slot)]);
+        row->setToolTip(tip.join(QLatin1Char('\n')));
+    }
+    if (QListWidgetItem* row = m_playlistList->item(m_playlist.current())) {
+        QFont f = row->font();
+        f.setBold(true);  // the one playing, also when another row is selected
+        row->setFont(f);
+        m_playlistList->setCurrentItem(row);
+        m_playlistList->scrollToItem(row);
+    }
+    if (!m_playlist.active()) {
+        m_playlistDock->hide();
+        m_playlistShownWindowed = false;
+    }
+}
+
+void MainWindow::closeSlot(int slot)
+{
+    m_player->close(slot);
+    if (!m_playlist.folder(slot).isEmpty()) {
+        m_playlist.setFolder(slot, QString());
+        syncPlaylist();
+    }
+    updateTitle();
+}
+
+void MainWindow::folderDialog(int slot)
+{
+    const QString dir = QFileDialog::getExistingDirectory(this, slot ? tr("Open folder as B") : tr("Open folder as A"), m_settings.lastDir);
+    if (dir.isEmpty())
+        return;
+    m_settings.lastDir = QFileInfo(dir).absolutePath();  // next time among its siblings: the folder to compare with
+    openFile(slot, dir);
+}
+
 void MainWindow::updateTitle()
 {
     QString t = QStringLiteral("SCVP");
@@ -122,12 +238,17 @@ void MainWindow::updateTitle()
                 .arg(names.join(QStringLiteral(" | ")))
                 .arg(m_player->controller().position())
                 .arg(m_player->controller().length());
+    if (m_playlist.active())
+        t = QStringLiteral("[%1/%2] ").arg(m_playlist.current() + 1).arg(m_playlist.items().size()) + t;
     setWindowTitle(t);
 }
 
 void MainWindow::toggleFullscreen()
 {
     const bool on = !isFullScreen();
+    if (on)
+        m_playlistShownWindowed = m_playlistDock->isVisible();
+    m_playlistDock->setVisible(!on && m_playlistShownWindowed);
     m_stage->setFullscreenMode(on);
     menuBar()->setVisible(!on);
     on ? showFullScreen() : showNormal();
@@ -162,8 +283,12 @@ void MainWindow::handleAction(Action a, bool)
     case Action::InfoOverlay: m_hud->setInfoVisible(!m_hud->infoVisible()); break;
     case Action::OffsetMinus: m_player->setOffset(m_player->offset() - 1); break;
     case Action::OffsetPlus: m_player->setOffset(m_player->offset() + 1); break;
+    case Action::PlaylistPrevious: playItem(m_playlist.current() - 1); break;
+    case Action::PlaylistNext: playItem(m_playlist.current() + 1); break;
     case Action::SwapAB: {
         m_player->swapSlots();
+        m_playlist.swapSlots();
+        syncPlaylist();
         const render::ColorOverrides a = m_view->colorOverrides(0);
         m_view->setColorOverrides(0, m_view->colorOverrides(1));
         m_view->setColorOverrides(1, a);
@@ -377,19 +502,15 @@ void MainWindow::createMenus()
     openA->setShortcut(QKeySequence::Open);
     QAction* openB = file->addAction(tr("Open &B (compare)..."), this, [this] { openDialog(1); });
     openB->setShortcut(QKeySequence(Qt::ControlModifier | Qt::ShiftModifier | Qt::Key_O));
-    file->addAction(tr("Open image sequence folder..."), this, [this] {
-        const QString dir = QFileDialog::getExistingDirectory(this, tr("Image sequence folder"), m_settings.lastDir);
-        if (!dir.isEmpty()) {
-            m_settings.lastDir = dir;
-            openFile(m_player->slotOpen(0) ? 1 : 0, dir);
-        }
-    });
+    // A folder of videos is a playlist (two pair by file name), a folder of images an image sequence.
+    file->addAction(tr("Open &Folder as A..."), this, [this] { folderDialog(0); });
+    file->addAction(tr("Open Folder as B (compare)..."), this, [this] { folderDialog(1); });
     file->addAction(tr("Open raw video as A..."), this, [this] { openDialog(0, true); });
     file->addAction(tr("Open raw video as B..."), this, [this] { openDialog(1, true); });
     file->addSeparator();
-    QAction* close = file->addAction(tr("&Close A"), this, [this] { m_player->close(0); updateTitle(); });
+    QAction* close = file->addAction(tr("&Close A"), this, [this] { closeSlot(0); });
     close->setShortcut(QKeySequence(Qt::ControlModifier | Qt::Key_W));
-    QAction* closeB = file->addAction(tr("Close B"), this, [this] { m_player->close(1); updateTitle(); });
+    QAction* closeB = file->addAction(tr("Close B"), this, [this] { closeSlot(1); });
     closeB->setShortcut(QKeySequence(Qt::ControlModifier | Qt::ShiftModifier | Qt::Key_W));
     file->addSeparator();
     m_exportAction = file->addAction(tr("&Export Comparison Video..."), this, &MainWindow::exportVideo);
@@ -424,6 +545,9 @@ void MainWindow::createMenus()
     play->addSeparator();
     for (Action a : {Action::LoopIn, Action::LoopOut, Action::LoopToggle, Action::LoopClear})
         playerAction(play, a);
+    play->addSeparator();
+    for (Action a : {Action::PlaylistNext, Action::PlaylistPrevious})
+        playerAction(play, a);
 
     QMenu* view = menuBar()->addMenu(tr("&View"));
     for (Action a : {Action::ZoomFit, Action::ZoomOneToOne, Action::ZoomIn, Action::ZoomOut})
@@ -441,6 +565,7 @@ void MainWindow::createMenus()
     playerAction(view, Action::LegendText);
     for (Action a : {Action::InfoOverlay, Action::Fullscreen})
         playerAction(view, a);
+    view->addAction(m_playlistDock->toggleViewAction());
 
     createColorMenu();
 

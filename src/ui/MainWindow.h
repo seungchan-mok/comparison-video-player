@@ -3,6 +3,7 @@
 #include "ui/ExportDialog.h"
 #include "ui/ExportJob.h"
 #include "ui/KeyMap.h"
+#include "ui/Playlist.h"
 #include "ui/Settings.h"
 
 #include "render/ColorParams.h"
@@ -15,6 +16,8 @@
 #include <optional>
 
 class QActionGroup;
+class QDockWidget;
+class QListWidget;
 
 namespace scvp::ui {
 
@@ -34,8 +37,13 @@ public:
     ~MainWindow() override;
 
     // Raw video files without their geometry in the name ask for it (askRaw forces the dialog);
-    // `raw` opens the file as that raw video (command line --raw).
+    // `raw` opens the file as that raw video (command line --raw). A folder holding videos becomes
+    // the slot's playlist folder (paired with the other slot's by file name) and opens its first
+    // item; a file replaces the slot's playlist folder.
     bool openFile(int slot, const QString& path, bool askRaw = false, const std::optional<RawVideoParams>& raw = std::nullopt);
+    // Opens item i of the playlist in the slots that have a folder, from its first frame.
+    bool playItem(int i);
+    const Playlist& playlist() const { return m_playlist; }
     Player* player() const { return m_player; }
     VideoView* view() const { return m_view; }
     HudOverlay* hud() const { return m_hud; }
@@ -83,6 +91,11 @@ protected:
     void closeEvent(QCloseEvent* e) override;
 
 private:
+    bool openSlot(int slot, const QString& path, bool askRaw = false, const std::optional<RawVideoParams>& raw = std::nullopt);
+    bool openFolder(int slot, const QString& dir);
+    void folderDialog(int slot);
+    void closeSlot(int slot);
+    void syncPlaylist();  // the panel's rows, current row and visibility
     void updateTitle();
     void createMenus();
     QAction* playerAction(QMenu* menu, Action a);
@@ -112,6 +125,10 @@ private:
     ExportProgress* m_exportProgress;
     QAction* m_exportAction = nullptr;
     ExportStats m_lastExport;
+    Playlist m_playlist;
+    QDockWidget* m_playlistDock;
+    QListWidget* m_playlistList;
+    bool m_playlistShownWindowed = false;  // the panel hides in fullscreen and comes back after
 };
 
 } // namespace scvp::ui

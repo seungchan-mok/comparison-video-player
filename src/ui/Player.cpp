@@ -216,6 +216,8 @@ void Player::present(const TickResult& r)
         m_lastStalled = r.stalled;
         emit stalledChanged(r.stalled);
     }
+    if (r.ended)
+        emit ended();
 }
 
 } // namespace scvp::ui

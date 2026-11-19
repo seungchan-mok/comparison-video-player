@@ -48,6 +48,8 @@ enum class Action {
     Legend,
     LegendText,
     CopyView,
+    PlaylistPrevious,
+    PlaylistNext,
     Count
 };
 
