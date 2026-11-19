@@ -11,6 +11,7 @@
 #include "ui/VideoView.h"
 
 #include <QCommandLineParser>
+#include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QKeySequence>
 #include <QTimer>
@@ -550,6 +551,14 @@ QString launchHelp(const KeyMap& keys)
               2, 80) +
          QLatin1Char('\n');
     return h;
+}
+
+QString versionText()
+{
+    auto v = [](unsigned int x) { return QStringLiteral("%1.%2.%3").arg(x >> 16).arg((x >> 8) & 0xff).arg(x & 0xff); };
+    return QStringLiteral("scvp %1\nQt %2\nFFmpeg %3 (avcodec %4, avformat %5, avutil %6, swscale %7)\n")
+        .arg(QCoreApplication::applicationVersion(), QLatin1String(qVersion()), QString::fromUtf8(av_version_info()), v(avcodec_version()),
+             v(avformat_version()), v(avutil_version()), v(swscale_version()));
 }
 
 void applyLaunchOptions(MainWindow& w, const LaunchOptions& o, std::function<void()> viewReady)

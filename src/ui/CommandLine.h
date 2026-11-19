@@ -65,6 +65,9 @@ bool readLaunchOptions(const QCommandLineParser& parser, LaunchOptions* out, QSt
 std::optional<RawVideoParams> parseRawSpec(const QString& spec);
 // The --help text: the options by section, notes, examples, the keys as `keys` binds them, the mouse.
 QString launchHelp(const KeyMap& keys);
+// The versions of SCVP (QCoreApplication::applicationVersion), Qt and FFmpeg, one per line: --version
+// prints it, Help > About SCVP shows it.
+QString versionText();
 
 // Shows the window and sets it up as `o` asks: decoding, the videos, position, comparison and
 // view. The zoom waits until the opened videos show a frame (only then are the image and the

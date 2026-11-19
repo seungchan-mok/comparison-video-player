@@ -3,6 +3,7 @@
 #include "engine/RawVideoSource.h"
 
 #include "ui/ClipboardImage.h"
+#include "ui/CommandLine.h"
 #include "ui/ControlBar.h"
 #include "ui/DesktopIntegration.h"
 #include "ui/ExportProgress.h"
@@ -576,6 +577,14 @@ void MainWindow::createMenus()
     compare->addSeparator();
     for (Action a : {Action::OffsetMinus, Action::OffsetPlus, Action::SwapAB})
         playerAction(compare, a);
+
+    QMenu* help = menuBar()->addMenu(tr("&Help"));
+    QAction* about = help->addAction(tr("&About SCVP..."), this, [this] {
+        QMessageBox::about(this, tr("About SCVP"),
+                           tr("SCVP %1\nSimple Comparison Video Player\n\n%2")
+                               .arg(QCoreApplication::applicationVersion(), versionText().section(QLatin1Char('\n'), 1).trimmed()));
+    });
+    about->setMenuRole(QAction::AboutRole);  // macOS: in the application menu
 }
 
 // Colour interpretation per video: metadata is often missing or wrong in camera and test files.
