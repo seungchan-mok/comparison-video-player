@@ -103,8 +103,12 @@ bool MainWindow::openFile(int slot, const QString& path, bool askRaw, const std:
 {
     if (!askRaw && !raw && folderHasVideos(path))
         return openFolder(slot, path);
+    const QString before = m_player->slotOpen(slot) ? QString::fromStdString(m_player->engine().info(slot).path) : QString();
     if (!openSlot(slot, path, askRaw, raw))
         return false;
+    // The legend text named the file that was here: another file starts from its own name.
+    if (QFileInfo(before) != QFileInfo(path))
+        m_hud->setLegendText(slot, QString());
     if (!m_playlist.folder(slot).isEmpty()) {
         m_playlist.setFolder(slot, QString());  // this file now, for every item of the other folder
         syncPlaylist();
@@ -127,7 +131,6 @@ bool MainWindow::openSlot(int slot, const QString& path, bool askRaw, const std:
         }
         opts.raw = p;
     }
-    const QString before = m_player->slotOpen(slot) ? QString::fromStdString(m_player->engine().info(slot).path) : QString();
     QString err;
     if (!m_player->open(slot, path, opts, &err)) {
         // Also for whoever started SCVP from a script and cannot see the dialog.
@@ -135,9 +138,6 @@ bool MainWindow::openSlot(int slot, const QString& path, bool askRaw, const std:
         QMessageBox::warning(this, tr("Cannot open file"), tr("%1\n\n%2").arg(path, err));
         return false;
     }
-    // The legend text named the file that was here: another file starts from its own name.
-    if (QFileInfo(before) != QFileInfo(path))
-        m_hud->setLegendText(slot, QString());
     updateTitle();
     return true;
 }
@@ -145,7 +145,12 @@ bool MainWindow::openSlot(int slot, const QString& path, bool askRaw, const std:
 // A folder opened: a new playlist, from its first item.
 bool MainWindow::openFolder(int slot, const QString& dir)
 {
-    m_playlist.setFolder(slot, QFileInfo(dir).absoluteFilePath());
+    const QString path = QFileInfo(dir).absoluteFilePath();
+    // A legend text names the videos of a folder (a method, an encoder) and stays from item to
+    // item; another folder starts from the file names.
+    if (m_playlist.folder(slot) != path)
+        m_hud->setLegendText(slot, QString());
+    m_playlist.setFolder(slot, path);
     m_playlistShownWindowed = true;
     if (!isFullScreen())
         m_playlistDock->show();
