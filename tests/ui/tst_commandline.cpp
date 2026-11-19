@@ -224,6 +224,17 @@ private slots:
         }
         QVERIFY(examples >= 5);
     }
+
+    // --version and Help > About: SCVP's version as the application has it, Qt's, FFmpeg's.
+    void versionTextNamesEachPart()
+    {
+        QCoreApplication::setApplicationVersion(QStringLiteral("9.8.7"));
+        const QStringList lines = versionText().trimmed().split(QLatin1Char('\n'));
+        QCOMPARE(lines.size(), 3);
+        QCOMPARE(lines[0], QStringLiteral("scvp 9.8.7"));
+        QCOMPARE(lines[1], QStringLiteral("Qt ") + QLatin1String(qVersion()));
+        QVERIFY2(lines[2].startsWith(QLatin1String("FFmpeg ")) && lines[2].contains(QLatin1String("avcodec ")), qPrintable(lines[2]));
+    }
 };
 
 QTEST_GUILESS_MAIN(TstCommandLine)

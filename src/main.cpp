@@ -36,14 +36,6 @@
 
 namespace {
 
-QString ffmpegVersionString()
-{
-    auto v = [](unsigned int x) { return QStringLiteral("%1.%2.%3").arg(x >> 16).arg((x >> 8) & 0xff).arg(x & 0xff); };
-    return QStringLiteral("FFmpeg %1 (avcodec %2, avformat %3, avutil %4, swscale %5)")
-        .arg(QString::fromUtf8(av_version_info()), v(avcodec_version()), v(avformat_version()), v(avutil_version()),
-             v(swscale_version()));
-}
-
 void setApplicationNames()
 {
     QCoreApplication::setApplicationName(QStringLiteral("scvp"));
@@ -140,8 +132,7 @@ int printInfo(int argc, char* argv[], Info info)
     if (info == Info::Help)
         report(scvp::ui::launchHelp(scvp::ui::AppSettings::load().keys), false);
     else
-        report(QStringLiteral("scvp %1\nQt %2\n%3\n").arg(QStringLiteral(SCVP_VERSION), QLatin1String(qVersion()), ffmpegVersionString()),
-               false);
+        report(scvp::ui::versionText(), false);
     return 0;
 }
 
@@ -301,7 +292,7 @@ int main(int argc, char* argv[])
         return 2;
     }
 
-    std::fprintf(stderr, "scvp %s, Qt %s, %s\n", SCVP_VERSION, qVersion(), qPrintable(ffmpegVersionString()));
+    std::fprintf(stderr, "%s\n", qPrintable(scvp::ui::versionText().trimmed().replace(QLatin1Char('\n'), QStringLiteral(", "))));
 
     scvp::ui::MainWindow window;
     FileOpenFilter fileOpen(window);
