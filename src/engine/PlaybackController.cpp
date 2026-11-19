@@ -405,6 +405,7 @@ TickResult PlaybackController::tick(double now)
         }
         if (!looping && m_position >= n - 1 && ready(map, n - 1)) {
             m_playing = false;  // reached the end
+            r.ended = true;
             requestAll();
         }
     }

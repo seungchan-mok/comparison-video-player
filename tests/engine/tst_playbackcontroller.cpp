@@ -147,9 +147,12 @@ private slots:
         PlaybackController c(b);
         c.mediaChanged();
         c.play();
-        c.tick(0);
-        QCOMPARE(c.tick(5.0).position, int64_t(9));
+        QVERIFY(!c.tick(0).ended);
+        const TickResult end = c.tick(5.0);
+        QCOMPARE(end.position, int64_t(9));
+        QVERIFY(end.ended);
         QVERIFY(!c.playing());
+        QVERIFY(!c.tick(6.0).ended);  // once
         c.play();  // playing again starts over
         QCOMPARE(c.position(), int64_t(0));
     }
@@ -174,6 +177,14 @@ private slots:
         QVERIFY(!c.loopActive());
         c.clearLoop();
         QVERIFY(!c.hasLoop());
+        // A loop up to the last frame wraps there: playback does not end.
+        c.setLoop(90, 99);
+        c.seek(95);
+        c.tick(1.0);
+        const TickResult wrapped = c.tick(1.0 + 6.5 / 30);
+        QCOMPARE(wrapped.position, int64_t(91));
+        QVERIFY(!wrapped.ended);
+        QVERIFY(c.playing());
     }
 
     void loopPointsFromPosition()

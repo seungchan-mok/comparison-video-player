@@ -66,6 +66,7 @@ struct TickResult {
     bool changed = false;    // something different should be presented
     bool stalled = false;    // playing but the next frame is not decoded yet
     double stalledSeconds = 0;
+    bool ended = false;      // playback stopped at the last frame on this tick (not by a pause)
 };
 
 // Transport logic on the UI thread: play/pause, frame steps, jumps, seeks, A-B loop and the
