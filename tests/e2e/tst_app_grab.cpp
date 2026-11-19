@@ -635,6 +635,16 @@ private slots:
         QVERIFY2(!img.isNull(), qPrintable(log));
         QVERIFY2(log.contains(QLatin1String(" playlist=2/3")), qPrintable(log));
         QVERIFY2(log.contains(QLatin1String("debug-legend: off, A \"c2.mp4\", B \"\"")), qPrintable(log));
+
+        // Legend texts name each folder's videos: they stay from item to item, also past an item
+        // B has no video for.
+        img = grab({a, b},
+                   {QStringLiteral("--legend-a"), QStringLiteral("x264"), QStringLiteral("--legend-b"), QStringLiteral("x265"),
+                    QStringLiteral("--debug-actions"), QStringLiteral("playlist_next,playlist_next"), QStringLiteral("--debug-after"), QStringLiteral("1500")},
+                   &log);
+        QVERIFY2(!img.isNull(), qPrintable(log));
+        QVERIFY2(log.contains(QLatin1String(" playlist=3/3")), qPrintable(log));
+        QVERIFY2(log.contains(QLatin1String("debug-legend: on, A \"x264\", B \"x265\"")), qPrintable(log));
     }
 
     // A bad value stops before any window, with the reason on stderr.

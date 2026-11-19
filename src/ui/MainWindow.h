@@ -41,7 +41,8 @@ public:
     // its subfolders) becomes the slot's playlist folder, paired with the other slot's by path and
     // name, and opens its first item; a file replaces the slot's playlist folder.
     bool openFile(int slot, const QString& path, bool askRaw = false, const std::optional<RawVideoParams>& raw = std::nullopt);
-    // Opens item i of the playlist in the slots that have a folder, from its first frame.
+    // Opens item i of the playlist in the slots that have a folder, from its first frame. Legend
+    // texts stay: they name a folder's videos, not one file.
     bool playItem(int i);
     const Playlist& playlist() const { return m_playlist; }
     Player* player() const { return m_player; }
