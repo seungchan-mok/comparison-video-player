@@ -603,6 +603,40 @@ private slots:
         QCOMPARE(m.captured(2).toInt(), int(expect.y()));
     }
 
+    // Two folders: their videos pair by name without the extension, in natural order (c1, c2,
+    // c10); a video only A has plays alone; Page Down goes to the next item, and one that has
+    // played to its end starts the next.
+    void foldersPlayAsPlaylist()
+    {
+        SCVP_REQUIRE_FIXTURES();
+        QTemporaryDir dir;
+        const QString a = dir.filePath(QStringLiteral("A")), b = dir.filePath(QStringLiteral("B"));
+        QVERIFY(QDir().mkpath(a) && QDir().mkpath(b));
+        const std::pair<const char*, QString> files[] = {
+            {"h264_b", a + QStringLiteral("/c1.mp4")},     {"h264_trim", a + QStringLiteral("/c2.mp4")},
+            {"h264_b", a + QStringLiteral("/c10.mp4")},    {"hevc_opengop", b + QStringLiteral("/c1.mkv")},
+            {"h264_opengop", b + QStringLiteral("/c10.mkv")},
+        };
+        for (const auto& [name, to] : files)
+            QVERIFY(QFile::copy(test::fixture(QLatin1String(name))->path, to));
+
+        QString log;
+        QImage img = grab({a, b}, {QStringLiteral("--debug-actions"), QStringLiteral("playlist_next"), QStringLiteral("--debug-after"), QStringLiteral("1500")},
+                          &log);
+        if (img.isNull() && log.contains(QLatin1String("Xvfb not found")))
+            QSKIP("Xvfb not available");
+        QVERIFY2(!img.isNull(), qPrintable(log));
+        QVERIFY2(log.contains(QLatin1String(" playlist=2/3")), qPrintable(log));
+        QVERIFY2(log.contains(QLatin1String("debug-legend: off, A \"c2.mp4\", B \"\"")), qPrintable(log));  // B has no c2: closed
+
+        // Five frames before the end of c1 (180 frames): c2 plays a moment later.
+        img = grab({a, b}, {QStringLiteral("--frame"), QStringLiteral("175"), QStringLiteral("--play"), QStringLiteral("--debug-after"), QStringLiteral("2500")},
+                   &log);
+        QVERIFY2(!img.isNull(), qPrintable(log));
+        QVERIFY2(log.contains(QLatin1String(" playlist=2/3")), qPrintable(log));
+        QVERIFY2(log.contains(QLatin1String("debug-legend: off, A \"c2.mp4\", B \"\"")), qPrintable(log));
+    }
+
     // A bad value stops before any window, with the reason on stderr.
     void badArgumentFailsFast()
     {

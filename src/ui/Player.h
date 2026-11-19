@@ -76,6 +76,7 @@ signals:
     void playingChanged(bool playing);
     void mediaChanged();
     void stalledChanged(bool stalled);
+    void ended();  // playback stopped at the end (not paused, not looping)
 
 private:
     void onTick(double now);

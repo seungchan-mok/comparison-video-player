@@ -206,7 +206,9 @@ QString debugState(scvp::ui::MainWindow& w)
                                                     : QStringLiteral("none"))
       << QStringLiteral("offset=%1").arg(pc.offset())
       << QStringLiteral("matrix=%1,%2").arg(QLatin1String(matrix(a.matrix)), QLatin1String(matrix(b.matrix)))
-      << QStringLiteral("range=%1,%2").arg(QLatin1String(range(a.range)), QLatin1String(range(b.range)));
+      << QStringLiteral("range=%1,%2").arg(QLatin1String(range(a.range)), QLatin1String(range(b.range)))
+      << QStringLiteral("playlist=%1").arg(w.playlist().active() ? QStringLiteral("%1/%2").arg(w.playlist().current() + 1).arg(w.playlist().items().size())
+                                                                 : QStringLiteral("none"));
     return s.join(QLatin1Char(' '));
 }
 

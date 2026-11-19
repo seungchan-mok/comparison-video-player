@@ -487,9 +487,12 @@ QString launchHelp(const KeyMap& keys)
         if (s.id == Section::Files) {
             h += entry(QStringLiteral("A"),
                        QStringLiteral("Video to open: any file FFmpeg reads (mp4, mkv, mov, avi, webm, ts, ...), raw "
-                                      "H.264/HEVC/MPEG-2, raw YUV/RGB/Bayer, or an image sequence (a folder, or one "
-                                      "numbered file such as shot_0001.png)."));
-            h += entry(QStringLiteral("B"), QStringLiteral("Video to compare with A."));
+                                      "H.264/HEVC/MPEG-2, raw YUV/RGB/Bayer, or an image sequence (a folder of images, or "
+                                      "one numbered file such as shot_0001.png). A folder of videos opens as a playlist "
+                                      "(Page Down: next item; the next one also starts when one has played to its end)."));
+            h += entry(QStringLiteral("B"), QStringLiteral("Video to compare with A. With folders as A and B, the playlist pairs "
+                                                           "their videos by file name without the extension (clip.mp4 with "
+                                                           "clip.mkv); a video only one folder has plays alone."));
         }
         for (const OptionDef& d : optionDefs())
             if (d.section == s.id)
@@ -514,6 +517,7 @@ QString launchHelp(const KeyMap& keys)
         {"scvp ref.mp4 enc.mp4 --view diff --diff-gain 8 --frame 120", "where they differ, amplified"},
         {"scvp a.mp4 a_cut.mp4 --offset -3", "B lacks A's first 3 frames"},
         {"scvp src.yuv enc.mp4 --raw-a 1920x1080:yuv420p:30 --wipe 0.3", "raw source against its encode"},
+        {"scvp ref_dir/ enc_dir/ --view diff --play", "every video of two folders, paired by name, one after another"},
         {"scvp a.mp4 b.mp4 --view sbs --zoom 32 --center 960,540 --pixel-mode codes --frame 50",
          "the Y U V codes around one pixel"},
         {"scvp a.mkv b.mkv --legend-a \"x264 crf 20\" --legend-b \"x265 crf 22\" --play --loop 0:99", "named, looping"},
@@ -540,8 +544,9 @@ QString launchHelp(const KeyMap& keys)
     h += QStringLiteral("\nMouse:\n");
     h += QStringLiteral("  ") +
          wrap(QStringLiteral("Wheel or pinch zooms at the cursor, dragging pans, dragging the wipe divider moves it, "
-                             "double-click toggles fullscreen, the back/forward buttons step one frame. A file dropped "
-                             "on the left (top) half opens as A, on the other half as B."),
+                             "double-click toggles fullscreen, the back/forward buttons step one frame. A file or "
+                             "folder dropped on the left (top) half opens as A, on the other half as B. In the "
+                             "playlist panel, double-click opens an item."),
               2, 80) +
          QLatin1Char('\n');
     return h;
