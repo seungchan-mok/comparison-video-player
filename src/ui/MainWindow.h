@@ -37,9 +37,9 @@ public:
     ~MainWindow() override;
 
     // Raw video files without their geometry in the name ask for it (askRaw forces the dialog);
-    // `raw` opens the file as that raw video (command line --raw). A folder holding videos becomes
-    // the slot's playlist folder (paired with the other slot's by file name) and opens its first
-    // item; a file replaces the slot's playlist folder.
+    // `raw` opens the file as that raw video (command line --raw). A folder with videos (also in
+    // its subfolders) becomes the slot's playlist folder, paired with the other slot's by path and
+    // name, and opens its first item; a file replaces the slot's playlist folder.
     bool openFile(int slot, const QString& path, bool askRaw = false, const std::optional<RawVideoParams>& raw = std::nullopt);
     // Opens item i of the playlist in the slots that have a folder, from its first frame.
     bool playItem(int i);

@@ -489,11 +489,13 @@ QString launchHelp(const KeyMap& keys)
             h += entry(QStringLiteral("A"),
                        QStringLiteral("Video to open: any file FFmpeg reads (mp4, mkv, mov, avi, webm, ts, ...), raw "
                                       "H.264/HEVC/MPEG-2, raw YUV/RGB/Bayer, or an image sequence (a folder of images, or "
-                                      "one numbered file such as shot_0001.png). A folder of videos opens as a playlist "
-                                      "(Page Down: next item; the next one also starts when one has played to its end)."));
+                                      "one numbered file such as shot_0001.png). A folder with videos in it or in its "
+                                      "subfolders opens as a playlist (Page Down: next item; the next one also starts when "
+                                      "one has played to its end)."));
             h += entry(QStringLiteral("B"), QStringLiteral("Video to compare with A. With folders as A and B, the playlist pairs "
-                                                           "their videos by file name without the extension (clip.mp4 with "
-                                                           "clip.mkv); a video only one folder has plays alone."));
+                                                           "their videos by the path below the folder without the extension "
+                                                           "(day1/clip.mp4 with day1/clip.mkv); a video only one folder has "
+                                                           "plays alone."));
         }
         for (const OptionDef& d : optionDefs())
             if (d.section == s.id)
